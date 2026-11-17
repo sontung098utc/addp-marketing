@@ -1,0 +1,1 @@
+﻿SHA256 (marketing_addp_p0_webhook_database_first_final_release.zip) = 28482234F428975C992755A7A818DDF4C602D01AFA06905F08B8F8EEF0CF21B2

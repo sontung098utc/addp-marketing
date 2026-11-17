@@ -1,0 +1,24 @@
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+  
+  # Chuyển hướng sang HTTPS tự động
+  RewriteCond %{HTTPS} off
+  RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+  # Chuyển tiếp Authorization header cho FastCGI / PHP-FPM
+  RewriteCond %{HTTP:Authorization} .+
+  RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+  # Chặn truy cập trực tiếp vào các file môi trường và cấu hình nhạy cảm
+  <FilesMatch "^\.env">
+    Order allow,deny
+    Deny from all
+  </FilesMatch>
+
+  # Hỗ trợ SPA Routing cho React/Vite (Tránh lỗi 404 khi tải lại trang con)
+  RewriteRule ^index\.html$ - [L]
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule . /index.html [L]
+</IfModule>

@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "TikTok Shop Audit & Sync - Marketing ADDP",
+  "version": "1.5.1",
+  "description": "Tiện ích trích xuất dữ liệu thực tế từ TikTok Shop Seller Center và đồng bộ về Marketing ADDP.",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting",
+    "tabs"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "host_permissions": [
+    "https://seller-vn.tiktok.com/*",
+    "https://seller.tiktok.com/*",
+    "https://marketing.addp.vn/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://seller-vn.tiktok.com/*",
+        "https://seller.tiktok.com/*",
+        "https://marketing.addp.vn/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+      ],
+      "js": ["content_script.js"],
+      "all_frames": false
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Đồng Bộ Số Liệu TikTok Shop"
+  }
+}
+

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23fe2c55' d='M12 2A10 10 0 0 0 2 12a10 10 0 0 0 10 10 10 10 0 0 0 10-10A10 10 0 0 0 12 2m0 2a8 8 0 0 1 8 8 8 8 0 0 1-8 8 8 8 0 0 1-8-8 8 8 0 0 1 8-8m-1 3v6.5a2.5 2.5 0 0 0-2.5 2.5 2.5 2.5 0 0 0 2.5 2.5 2.5 2.5 0 0 0 2.5-2.5V9.9c1.2.9 2.7 1.4 4.3 1.4v-2c-2.4 0-4.3-1.9-4.3-4.3H11Z'/%3E%3C/svg%3E" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Phần mềm quản lý, theo dõi và đánh giá tối ưu hóa quảng cáo GMV Max và LIVE GMV Max trên sàn TikTok Shop." />
+    <meta name="author" content="Antigravity Team" />
+    <title>TikTok Shop Ads Manager | Quản lý Quảng cáo GMV Max & GMV Live</title>
+    <script>
+      // Trình bắt lỗi tải tệp tin toàn cục (bỏ qua ảnh lỗi để tránh alert sai)
+      window.addEventListener('error', function(e) {
+        if (e.target && e.target.tagName === 'IMG') {
+          return; // Bỏ qua lỗi tải hình ảnh
+        }
+        var file = e.filename || (e.target && e.target.src) || (e.target && e.target.href) || 'unknown';
+        alert('⚠️ Phát hiện lỗi tải file hoặc cú pháp JS:\nFile: ' + file + '\nLỗi: ' + (e.message || 'Không thể tải file (404) hoặc bị chặn cache.'));
+      }, true);
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

@@ -1,0 +1,21 @@
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # Chuyển tiếp Authorization header cho FastCGI / PHP-FPM
+  RewriteCond %{HTTP:Authorization} .+
+  RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+  # Chặn truy cập trực tiếp vào các file môi trường
+  <FilesMatch "^\.env">
+    Order allow,deny
+    Deny from all
+  </FilesMatch>
+
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+
+  RewriteRule ^api/ - [L]
+  RewriteRule ^ index.html [L]
+</IfModule>

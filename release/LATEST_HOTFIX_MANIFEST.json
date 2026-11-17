@@ -1,0 +1,27 @@
+{
+  "package": "hotfix_live_workbench_20261002_102857.zip",
+  "package_sha256": "ee1703623f6fcd2f8f881c4c031e990ba143767f78e4b54530cde8fba7743b8a",
+  "package_size": 160656,
+  "files": {
+    "public/api/commerce_analytics_service.php": {
+      "target": "api/commerce_analytics_service.php",
+      "bytes": 28783,
+      "sha256": "95579451f96f2694500cb02df4cefacf2e626f3d638bf1c63c51cd4cc9ebcac7"
+    },
+    "dist/index.html": {
+      "target": "index.html",
+      "bytes": 1723,
+      "sha256": "59405b8c7d42d09f2f1cb0226db824f6f7d180556107f2e25ee5e9b5ea1552cb"
+    },
+    "dist/assets/index-D4REqcG3.js": {
+      "target": "assets/index-D4REqcG3.js",
+      "bytes": 664321,
+      "sha256": "01124d635c55964c215cdaa4afc05f49021eda893d32c8710c9a214a36592c64"
+    },
+    "dist/assets/index-DuDEHqtr.css": {
+      "target": "assets/index-DuDEHqtr.css",
+      "bytes": 15483,
+      "sha256": "bf640359c9d328ab7f4786abd496861fcbab5209e126133828f848dce5fa1eec"
+    }
+  }
+}
