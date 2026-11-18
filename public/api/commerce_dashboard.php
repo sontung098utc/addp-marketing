@@ -3342,8 +3342,16 @@ try {
         // =====================================================================
         case 'get_sop_pacing':
             $targetDate = trim((string)($_GET['date'] ?? $_POST['date'] ?? date('Y-m-d')));
+            $sopStartDate = trim((string)($_GET['start_date'] ?? $_POST['start_date'] ?? ''));
+            $sopEndDate = trim((string)($_GET['end_date'] ?? $_POST['end_date'] ?? ''));
             $currentHour = isset($_GET['hour']) && is_numeric($_GET['hour']) ? (int)$_GET['hour'] : null;
-            $overview = $sopPacingService->getPacingOverview($shopId, $targetDate, $currentHour);
+            $overview = $sopPacingService->getPacingOverview(
+                $shopId,
+                $targetDate,
+                $currentHour,
+                $sopStartDate !== '' ? $sopStartDate : null,
+                $sopEndDate !== '' ? $sopEndDate : null
+            );
             echo json_encode([
                 'success' => true,
                 'data' => $overview

@@ -164,9 +164,11 @@ function renderAiReportBlock(payload) {
 
   const pills = [];
   if (snap) {
+    const snapDays = Number(snap.days_count || 1);
+    const snapPeriodLabel = snapDays > 1 ? `Doanh số (${snapDays} ngày)` : 'Doanh số ngày';
     if (snap.actual_gmv !== undefined) {
       pills.push({
-        label: 'Doanh số ngày',
+        label: snapPeriodLabel,
         val: `${formatVND(snap.actual_gmv)} / ${formatVND(snap.daily_gmv_target || 0)}`
       });
     }
@@ -279,8 +281,38 @@ export default function CommerceSopCommandCenterView({
   endDate,
   apiRequest
 }) {
+  const [filterMode, setFilterMode] = useState(() => (startDate && endDate && startDate !== endDate ? 'custom' : 'single'));
   const [selectedDate, setSelectedDate] = useState(() => endDate || getTodayLocalDate());
+  const [rangeStart, setRangeStart] = useState(() => startDate || getTodayLocalDate());
+  const [rangeEnd, setRangeEnd] = useState(() => endDate || getTodayLocalDate());
   const [hasManualDate, setHasManualDate] = useState(false);
+
+  const effectiveStart = filterMode === 'single' ? selectedDate : rangeStart;
+  const effectiveEnd = filterMode === 'single' ? selectedDate : rangeEnd;
+
+  const applyQuickRange = (mode) => {
+    setHasManualDate(true);
+    const anchor = getTodayLocalDate();
+    if (mode === 'single') {
+      setFilterMode('single');
+      return;
+    }
+    setFilterMode(mode);
+    if (mode === '7d') {
+      const d = new Date(`${anchor}T00:00:00`);
+      d.setDate(d.getDate() - 6);
+      setRangeStart(d.toISOString().slice(0, 10));
+      setRangeEnd(anchor);
+    } else if (mode === 'mtd') {
+      setRangeStart(`${anchor.slice(0, 7)}-01`);
+      setRangeEnd(anchor);
+    } else if (mode === '30d') {
+      const d = new Date(`${anchor}T00:00:00`);
+      d.setDate(d.getDate() - 29);
+      setRangeStart(d.toISOString().slice(0, 10));
+      setRangeEnd(anchor);
+    }
+  };
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
@@ -317,7 +349,7 @@ export default function CommerceSopCommandCenterView({
     setError(null);
     try {
       const res = await apiRequest(
-        `commerce_dashboard.php?action=get_sop_pacing&shop_id=${encodeURIComponent(shopId)}&date=${encodeURIComponent(selectedDate)}`
+        `commerce_dashboard.php?action=get_sop_pacing&shop_id=${encodeURIComponent(shopId)}&date=${encodeURIComponent(effectiveEnd)}&start_date=${encodeURIComponent(effectiveStart)}&end_date=${encodeURIComponent(effectiveEnd)}`
       );
       if (res && res.success && res.data) {
         setData(res.data);
@@ -332,13 +364,23 @@ export default function CommerceSopCommandCenterView({
     } finally {
       setLoading(false);
     }
-  }, [shopId, selectedDate, apiRequest]);
+  }, [shopId, effectiveStart, effectiveEnd, apiRequest]);
 
   useEffect(() => {
-    if (endDate && !hasManualDate && endDate !== selectedDate) {
-      setSelectedDate(endDate);
+    if (!hasManualDate && startDate && endDate) {
+      if (startDate === endDate) {
+        setFilterMode('single');
+        setSelectedDate(endDate);
+        setRangeStart(startDate);
+        setRangeEnd(endDate);
+      } else {
+        setFilterMode('custom');
+        setRangeStart(startDate);
+        setRangeEnd(endDate);
+        setSelectedDate(endDate);
+      }
     }
-  }, [endDate, hasManualDate, selectedDate]);
+  }, [startDate, endDate, hasManualDate]);
 
   useEffect(() => {
     fetchPacing();
@@ -348,17 +390,17 @@ export default function CommerceSopCommandCenterView({
     if (!apiRequest || syncingTikTok) return;
     setSyncingTikTok(true);
     setSyncBanner(null);
-    const monthStart = startDate || `${selectedDate.slice(0, 7)}-01`;
+    const syncStart = effectiveStart || `${effectiveEnd.slice(0, 7)}-01`;
     try {
       const res = await apiRequest(
-        `commerce_dashboard.php?action=trigger_sync&shop_id=${encodeURIComponent(shopId)}&domain=ads_all&start_date=${encodeURIComponent(monthStart)}&end_date=${encodeURIComponent(selectedDate)}`,
+        `commerce_dashboard.php?action=trigger_sync&shop_id=${encodeURIComponent(shopId)}&domain=ads_all&start_date=${encodeURIComponent(syncStart)}&end_date=${encodeURIComponent(effectiveEnd)}`,
         'POST',
-        { shop_id: shopId, domain: 'ads_all', start_date: monthStart, end_date: selectedDate }
+        { shop_id: shopId, domain: 'ads_all', start_date: syncStart, end_date: effectiveEnd }
       );
       if (res && res.success) {
         setSyncBanner({
           type: 'success',
-          text: res.message || `Đã đồng bộ số liệu quảng cáo thực tế từ TikTok (${monthStart} đến ${selectedDate}).`
+          text: res.message || `Đã đồng bộ số liệu quảng cáo thực tế từ TikTok (${syncStart} đến ${effectiveEnd}).`
         });
         await fetchPacing();
       } else {
@@ -479,7 +521,9 @@ export default function CommerceSopCommandCenterView({
         {
           mode: 'overview',
           shop_id: shopId,
-          date: selectedDate
+          date: effectiveEnd,
+          start_date: effectiveStart,
+          end_date: effectiveEnd
         }
       );
       if (res && res.success) {
@@ -631,18 +675,78 @@ export default function CommerceSopCommandCenterView({
         </div>
 
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '8px', padding: '5px 10px' }}>
-            <Calendar size={14} style={{ color: '#475569' }} />
-            <input
-              type="date"
-              value={selectedDate}
-              onChange={(e) => {
-                setHasManualDate(true);
-                setSelectedDate(e.target.value);
-              }}
-              style={{ border: 'none', background: 'transparent', fontSize: '13px', color: '#0f172a', outline: 'none' }}
-            />
+          {/* Bộ lọc nhanh: 1 ngày / 7 ngày / Từ đầu tháng / 30 ngày / Khoảng ngày */}
+          <div style={{ display: 'inline-flex', alignItems: 'center', background: '#f1f5f9', borderRadius: '8px', padding: '3px', gap: '2px' }}>
+            {[
+              { id: 'single', label: '1 ngày' },
+              { id: '7d', label: '7 ngày' },
+              { id: 'mtd', label: 'Đầu tháng → nay' },
+              { id: '30d', label: '30 ngày' },
+              { id: 'custom', label: 'Khoảng ngày' }
+            ].map((opt) => {
+              const active = filterMode === opt.id;
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => applyQuickRange(opt.id)}
+                  style={{
+                    padding: '5px 9px',
+                    borderRadius: '6px',
+                    border: 'none',
+                    fontSize: '12px',
+                    fontWeight: active ? '700' : '500',
+                    background: active ? '#ffffff' : 'transparent',
+                    color: active ? '#2563eb' : '#475569',
+                    boxShadow: active ? '0 1px 2px rgba(0,0,0,0.08)' : 'none',
+                    cursor: 'pointer'
+                  }}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
           </div>
+
+          {filterMode === 'single' ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '8px', padding: '5px 10px' }}>
+              <Calendar size={14} style={{ color: '#475569' }} />
+              <input
+                type="date"
+                value={selectedDate}
+                onChange={(e) => {
+                  setHasManualDate(true);
+                  setSelectedDate(e.target.value);
+                }}
+                style={{ border: 'none', background: 'transparent', fontSize: '13px', color: '#0f172a', outline: 'none' }}
+              />
+            </div>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '8px', padding: '5px 10px' }}>
+              <Calendar size={14} style={{ color: '#475569' }} />
+              <input
+                type="date"
+                value={rangeStart}
+                onChange={(e) => {
+                  setHasManualDate(true);
+                  setFilterMode('custom');
+                  setRangeStart(e.target.value);
+                }}
+                style={{ border: 'none', background: 'transparent', fontSize: '12px', color: '#0f172a', outline: 'none' }}
+              />
+              <span style={{ color: '#94a3b8', fontSize: '12px' }}>→</span>
+              <input
+                type="date"
+                value={rangeEnd}
+                onChange={(e) => {
+                  setHasManualDate(true);
+                  setFilterMode('custom');
+                  setRangeEnd(e.target.value);
+                }}
+                style={{ border: 'none', background: 'transparent', fontSize: '12px', color: '#0f172a', outline: 'none' }}
+              />
+            </div>
+          )}
 
           <button
             type="button"
@@ -895,7 +999,7 @@ export default function CommerceSopCommandCenterView({
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '700', fontSize: '14px', color: '#0f172a' }}>
               <ShoppingBag size={17} style={{ color: '#2563eb' }} />
-              <span>Toàn Cửa Hàng (Ngày & Tháng)</span>
+              <span>{(data?.days_count || 1) > 1 ? `Toàn Cửa Hàng (${data.days_count} ngày)` : 'Toàn Cửa Hàng (Ngày & Tháng)'}</span>
             </div>
             <span style={{ fontSize: '12px', fontWeight: '700', color: (shop.ads_roi || 0) >= (config.target_roi || 13) ? '#16a34a' : '#dc2626' }}>
               Hiệu quả thu/chi: {shop.ads_roi !== null && shop.ads_roi !== undefined ? `${shop.ads_roi}x` : 'Chưa có'} / {config.target_roi}x
@@ -904,15 +1008,24 @@ export default function CommerceSopCommandCenterView({
 
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '5px' }}>
-              <span style={{ color: '#475569' }}>Doanh số ngày ({shop.actual_orders || 0} đơn)</span>
+              <span style={{ color: '#475569' }}>
+                {(data?.days_count || 1) > 1 ? `Doanh số ${data.days_count} ngày (${shop.actual_orders || 0} đơn)` : `Doanh số ngày (${shop.actual_orders || 0} đơn)`}
+              </span>
               <span style={{ fontWeight: '700', color: '#0f172a' }}>{formatVND(shop.actual_gmv)} / {formatVND(shop.target_gmv)} ({shop.gmv_pacing_pct || 0}%)</span>
             </div>
             <ProgressBar pct={shop.gmv_pacing_pct} color="#2563eb" />
+            {(data?.days_count || 1) > 1 && (
+              <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
+                Trung bình/ngày: <strong>{formatVND(shop.avg_daily_gmv || 0)}</strong> (Mục tiêu/ngày: {formatVND(config.daily_gmv_target)})
+              </div>
+            )}
           </div>
 
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '5px' }}>
-              <span style={{ color: '#475569' }}>Chi tiêu / Giới hạn chi/ngày</span>
+              <span style={{ color: '#475569' }}>
+                {(data?.days_count || 1) > 1 ? `Chi tiêu ${data.days_count} ngày / Giới hạn` : 'Chi tiêu / Giới hạn chi/ngày'}
+              </span>
               <span style={{ fontWeight: '700', color: '#0f172a' }}>{formatVND(shop.actual_spend)} / {formatVND(shop.daily_spend_cap)} ({shop.spend_pacing_pct || 0}%)</span>
             </div>
             <ProgressBar pct={shop.spend_pacing_pct} color={(shop.spend_pacing_pct || 0) > 100 ? '#dc2626' : '#0ea5e9'} />

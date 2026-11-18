@@ -369,34 +369,58 @@ class CommerceSopPacingService {
 
     /**
      * Computes real-time SOP pacing, channel split, and Red/Yellow/Green alerts from real DB tables.
+     * Supports both single-day (`$date`) and multi-day range (`$startDate` .. `$endDate`).
      */
-    public function getPacingOverview(string $shopId, ?string $date = null, ?int $currentHour = null): array {
+    public function getPacingOverview(
+        string $shopId,
+        ?string $date = null,
+        ?int $currentHour = null,
+        ?string $startDate = null,
+        ?string $endDate = null
+    ): array {
         $targetDate = ($date && preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) ? $date : date('Y-m-d');
+        $periodEnd = ($endDate && preg_match('/^\d{4}-\d{2}-\d{2}$/', $endDate)) ? $endDate : $targetDate;
+        $periodStart = ($startDate && preg_match('/^\d{4}-\d{2}-\d{2}$/', $startDate)) ? $startDate : $periodEnd;
+        if ($periodStart > $periodEnd) {
+            $tmp = $periodStart;
+            $periodStart = $periodEnd;
+            $periodEnd = $tmp;
+        }
+        $daysCount = 1;
+        try {
+            $dtStart = new \DateTime($periodStart);
+            $dtEnd = new \DateTime($periodEnd);
+            $daysCount = max(1, (int)$dtStart->diff($dtEnd)->format('%a') + 1);
+        } catch (\Throwable $t) {
+            $daysCount = 1;
+        }
+        $isRange = $daysCount > 1;
         $evalHour = $currentHour !== null ? max(0, min(23, $currentHour)) : (int)date('G');
-        $monthStart = substr($targetDate, 0, 7) . '-01';
+        $monthStart = substr($periodEnd, 0, 7) . '-01';
 
         $config = $this->getConfig($shopId);
 
-        // 1. Real Orders & Shop GMV (Daily + Month-to-Date) from commerce_orders
-        $ordersDaily = $this->queryOrdersSummary($shopId, $targetDate, $targetDate);
-        $ordersMtd = $this->queryOrdersSummary($shopId, $monthStart, $targetDate);
+        // 1. Real Orders & Shop GMV (Selected Period + Month-to-Date) from commerce_orders
+        $ordersDaily = $this->queryOrdersSummary($shopId, $periodStart, $periodEnd);
+        $ordersMtd = $this->queryOrdersSummary($shopId, $monthStart, $periodEnd);
 
         // 2. Main SKU vs Secondary SKUs GMV from commerce_order_items + commerce_orders
         $skuSplitDaily = $this->querySkuSplitGmv(
             $shopId,
-            $targetDate,
+            $periodStart,
+            $periodEnd,
             $config['main_sku_keyword'],
             $config['main_sku_product_id']
         );
 
         // 3. Real Ads Performance (Product/Video vs LIVE) from commerce_ads_campaign_daily
-        $adsData = $this->queryAdsDaily($shopId, $targetDate);
+        $adsData = $this->queryAdsDaily($shopId, $periodStart, $periodEnd);
 
         // 4. Real LIVE Sessions from commerce_live_sessions
-        $liveSessions = $this->queryLiveSessions($shopId, $targetDate);
+        $liveSessions = $this->queryLiveSessions($shopId, $periodStart, $periodEnd);
 
         // 5. Real Video Analytics from commerce_video_analytics
-        $videoStats = $this->queryVideoAnalytics($shopId, $targetDate);
+        $videoStats = $this->queryVideoAnalytics($shopId, $periodStart, $periodEnd);
 
         // Combine & compute metrics
         $totalShopGmv = $ordersDaily['gross_gmv'];
@@ -425,36 +449,47 @@ class CommerceSopPacingService {
         $liveRoi = $liveSpend > 0 ? round($liveAdsGmv / $liveSpend, 2) : null;
         $liveBlendedRoi = $liveSpend > 0 ? round($liveEffectiveGmv / $liveSpend, 2) : null;
 
+        // Period-scaled targets (1 day = daily targets, N days = daily * N)
+        $periodGmvTarget = round($config['daily_gmv_target'] * $daysCount, 2);
+        $periodSpendCap = round($config['daily_spend_cap'] * $daysCount, 2);
+        $periodVideoGmvTarget = round($config['video_daily_gmv_target'] * $daysCount, 2);
+        $periodVideoSpendCap = round($config['video_daily_spend_cap'] * $daysCount, 2);
+        $periodLiveGmvTarget = round($config['live_daily_gmv_target'] * $daysCount, 2);
+        $periodLiveSpendCap = round($config['live_daily_spend_cap'] * $daysCount, 2);
+        $periodLiveSessionsTarget = $config['live_sessions_per_day'] * $daysCount;
+        $periodMainSkuGmvTarget = round($config['main_sku_daily_gmv_target'] * $daysCount, 2);
+        $periodSubSkuGmvTarget = round($config['sub_sku_daily_gmv_target'] * $daysCount, 2);
+
         // Pacing percentages
-        $dailyGmvPacingPct = $config['daily_gmv_target'] > 0
-            ? round(($totalShopGmv / $config['daily_gmv_target']) * 100.0, 1)
+        $dailyGmvPacingPct = $periodGmvTarget > 0
+            ? round(($totalShopGmv / $periodGmvTarget) * 100.0, 1)
             : 0.0;
-        $dailySpendCapPct = $config['daily_spend_cap'] > 0
-            ? round(($totalSpend / $config['daily_spend_cap']) * 100.0, 1)
+        $dailySpendCapPct = $periodSpendCap > 0
+            ? round(($totalSpend / $periodSpendCap) * 100.0, 1)
             : 0.0;
         $monthlyGmvPacingPct = $config['monthly_gmv_target'] > 0
             ? round(($ordersMtd['gross_gmv'] / $config['monthly_gmv_target']) * 100.0, 1)
             : 0.0;
 
-        $videoSpendCapPct = $config['video_daily_spend_cap'] > 0
-            ? round(($videoSpend / $config['video_daily_spend_cap']) * 100.0, 1)
+        $videoSpendCapPct = $periodVideoSpendCap > 0
+            ? round(($videoSpend / $periodVideoSpendCap) * 100.0, 1)
             : 0.0;
-        $videoGmvPacingPct = $config['video_daily_gmv_target'] > 0
-            ? round(($videoAdsGmv / $config['video_daily_gmv_target']) * 100.0, 1)
-            : 0.0;
-
-        $liveSpendCapPct = $config['live_daily_spend_cap'] > 0
-            ? round(($liveSpend / $config['live_daily_spend_cap']) * 100.0, 1)
-            : 0.0;
-        $liveGmvPacingPct = $config['live_daily_gmv_target'] > 0
-            ? round(($liveEffectiveGmv / $config['live_daily_gmv_target']) * 100.0, 1)
+        $videoGmvPacingPct = $periodVideoGmvTarget > 0
+            ? round(($videoAdsGmv / $periodVideoGmvTarget) * 100.0, 1)
             : 0.0;
 
-        $mainSkuGmvPacingPct = $config['main_sku_daily_gmv_target'] > 0
-            ? round(($skuSplitDaily['main_sku_gmv'] / $config['main_sku_daily_gmv_target']) * 100.0, 1)
+        $liveSpendCapPct = $periodLiveSpendCap > 0
+            ? round(($liveSpend / $periodLiveSpendCap) * 100.0, 1)
             : 0.0;
-        $subSkuGmvPacingPct = $config['sub_sku_daily_gmv_target'] > 0
-            ? round(($skuSplitDaily['sub_sku_gmv'] / $config['sub_sku_daily_gmv_target']) * 100.0, 1)
+        $liveGmvPacingPct = $periodLiveGmvTarget > 0
+            ? round(($liveEffectiveGmv / $periodLiveGmvTarget) * 100.0, 1)
+            : 0.0;
+
+        $mainSkuGmvPacingPct = $periodMainSkuGmvTarget > 0
+            ? round(($skuSplitDaily['main_sku_gmv'] / $periodMainSkuGmvTarget) * 100.0, 1)
+            : 0.0;
+        $subSkuGmvPacingPct = $periodSubSkuGmvTarget > 0
+            ? round(($skuSplitDaily['sub_sku_gmv'] / $periodSubSkuGmvTarget) * 100.0, 1)
             : 0.0;
 
         $totalSkuGmv = $skuSplitDaily['main_sku_gmv'] + $skuSplitDaily['sub_sku_gmv'];
@@ -519,7 +554,11 @@ class CommerceSopPacingService {
 
         return [
             'shop_id' => $shopId,
-            'stat_date' => $targetDate,
+            'stat_date' => $periodEnd,
+            'start_date' => $periodStart,
+            'end_date' => $periodEnd,
+            'days_count' => $daysCount,
+            'is_range' => $isRange,
             'evaluated_hour' => $evalHour,
             'config' => $config,
             'data_sources' => [
@@ -532,11 +571,13 @@ class CommerceSopPacingService {
             'pacing' => [
                 'total_shop' => [
                     'actual_gmv' => round($totalShopGmv, 2),
-                    'target_gmv' => $config['daily_gmv_target'],
+                    'avg_daily_gmv' => round($totalShopGmv / $daysCount, 2),
+                    'target_gmv' => $periodGmvTarget,
                     'gmv_pacing_pct' => $dailyGmvPacingPct,
                     'actual_orders' => $totalShopOrders,
                     'actual_spend' => round($totalSpend, 2),
-                    'daily_spend_cap' => $config['daily_spend_cap'],
+                    'avg_daily_spend' => round($totalSpend / $daysCount, 2),
+                    'daily_spend_cap' => $periodSpendCap,
                     'spend_pacing_pct' => $dailySpendCapPct,
                     'ads_gmv' => round($totalAdsGmv, 2),
                     'ads_roi' => $adsActualRoi,
@@ -552,10 +593,10 @@ class CommerceSopPacingService {
                 'video_channel' => [
                     'split_pct' => $config['video_split_pct'],
                     'actual_spend' => round($videoSpend, 2),
-                    'daily_spend_cap' => $config['video_daily_spend_cap'],
+                    'daily_spend_cap' => $periodVideoSpendCap,
                     'spend_pacing_pct' => $videoSpendCapPct,
                     'actual_gmv' => round($videoAdsGmv, 2),
-                    'target_gmv' => $config['video_daily_gmv_target'],
+                    'target_gmv' => $periodVideoGmvTarget,
                     'gmv_pacing_pct' => $videoGmvPacingPct,
                     'actual_roi' => $videoRoi,
                     'target_roi' => $config['video_target_roi'],
@@ -567,7 +608,7 @@ class CommerceSopPacingService {
                         'keyword' => $config['main_sku_keyword'],
                         'split_pct' => $config['main_sku_split_pct'],
                         'actual_gmv' => round($skuSplitDaily['main_sku_gmv'], 2),
-                        'target_gmv' => $config['main_sku_daily_gmv_target'],
+                        'target_gmv' => $periodMainSkuGmvTarget,
                         'gmv_pacing_pct' => $mainSkuGmvPacingPct,
                         'actual_share_pct' => $mainSkuActualSharePct,
                         'orders' => $skuSplitDaily['main_sku_orders'],
@@ -575,7 +616,7 @@ class CommerceSopPacingService {
                     'sub_sku' => [
                         'split_pct' => $config['sub_sku_split_pct'],
                         'actual_gmv' => round($skuSplitDaily['sub_sku_gmv'], 2),
-                        'target_gmv' => $config['sub_sku_daily_gmv_target'],
+                        'target_gmv' => $periodSubSkuGmvTarget,
                         'gmv_pacing_pct' => $subSkuGmvPacingPct,
                         'actual_share_pct' => $subSkuActualSharePct,
                         'orders' => $skuSplitDaily['sub_sku_orders'],
@@ -584,18 +625,18 @@ class CommerceSopPacingService {
                 'live_channel' => [
                     'split_pct' => $config['live_split_pct'],
                     'actual_spend' => round($liveSpend, 2),
-                    'daily_spend_cap' => $config['live_daily_spend_cap'],
+                    'daily_spend_cap' => $periodLiveSpendCap,
                     'spend_pacing_pct' => $liveSpendCapPct,
                     'actual_gmv' => round($liveEffectiveGmv, 2),
                     'ads_gmv' => round($liveAdsGmv, 2),
                     'session_gmv' => round($liveSessionGmv, 2),
-                    'target_gmv' => $config['live_daily_gmv_target'],
+                    'target_gmv' => $periodLiveGmvTarget,
                     'gmv_pacing_pct' => $liveGmvPacingPct,
                     'actual_roi' => $liveRoi,
                     'blended_roi' => $liveBlendedRoi,
                     'target_roi' => $config['live_target_roi'],
                     'sessions_today' => $liveSessions['session_count'],
-                    'sessions_target' => $config['live_sessions_per_day'],
+                    'sessions_target' => $periodLiveSessionsTarget,
                     'per_session_gmv_target' => $config['live_per_session_gmv_target'],
                     'live_views_today' => $liveSessions['total_views'],
                 ],
@@ -635,7 +676,7 @@ class CommerceSopPacingService {
     /**
      * Queries Main SKU vs Secondary SKUs GMV from commerce_order_items + commerce_orders.
      */
-    private function querySkuSplitGmv(string $shopId, string $date, string $mainKeyword, ?string $mainProductId): array {
+    private function querySkuSplitGmv(string $shopId, string $startDate, string $endDate, string $mainKeyword, ?string $mainProductId): array {
         if (!$this->tableExists('commerce_order_items') || !$this->tableExists('commerce_orders')) {
             return [
                 'main_sku_gmv' => 0.0,
@@ -658,7 +699,7 @@ class CommerceSopPacingService {
               AND o.platform_created_at >= ?
               AND o.platform_created_at <= ?
             GROUP BY i.product_id");
-            $stmt->execute([$shopId, $date . ' 00:00:00', $date . ' 23:59:59']);
+            $stmt->execute([$shopId, $startDate . ' 00:00:00', $endDate . ' 23:59:59']);
             $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
             $mainGmv = 0.0;
@@ -708,7 +749,7 @@ class CommerceSopPacingService {
     /**
      * Queries real daily Ads spend, GMV, clicks, impressions, orders by channel (LIVE vs PRODUCT/Video).
      */
-    private function queryAdsDaily(string $shopId, string $date): array {
+    private function queryAdsDaily(string $shopId, string $startDate, string $endDate): array {
         $result = [
             'source_available' => false,
             'source_table' => 'NONE',
@@ -743,10 +784,10 @@ class CommerceSopPacingService {
                     COALESCE(SUM(clicks), 0) AS clicks,
                     COALESCE(SUM(impressions), 0) AS impressions
                 FROM `commerce_ads_campaign_daily`
-                WHERE shop_id = ? AND stat_date = ?
+                WHERE shop_id = ? AND stat_date >= ? AND stat_date <= ?
                 GROUP BY campaign_id
                 ORDER BY spend DESC");
-                $stmt->execute([$shopId, $date]);
+                $stmt->execute([$shopId, $startDate, $endDate]);
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
                 $result['source_available'] = true;
@@ -822,9 +863,9 @@ class CommerceSopPacingService {
                     COALESCE(SUM(gmv), 0) AS ads_gmv,
                     COALESCE(SUM(orders), 0) AS orders
                 FROM `tiktok_campaign_daily_reports`
-                WHERE stat_date = ?
+                WHERE stat_date >= ? AND stat_date <= ?
                 GROUP BY campaign_id");
-                $stmt->execute([$date]);
+                $stmt->execute([$startDate, $endDate]);
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
                 $result['source_available'] = true;
@@ -866,7 +907,7 @@ class CommerceSopPacingService {
     /**
      * Queries real LIVE session counts & GMV from commerce_live_sessions.
      */
-    private function queryLiveSessions(string $shopId, string $date): array {
+    private function queryLiveSessions(string $shopId, string $startDate, string $endDate): array {
         if (!$this->tableExists('commerce_live_sessions')) {
             return ['source_available' => false, 'session_count' => 0, 'total_gmv' => 0.0, 'total_views' => 0];
         }
@@ -878,7 +919,7 @@ class CommerceSopPacingService {
                 COALESCE(SUM(total_views), 0) AS total_views
             FROM `commerce_live_sessions`
             WHERE shop_id = ? AND start_time >= ? AND start_time <= ?");
-            $stmt->execute([$shopId, $date . ' 00:00:00', $date . ' 23:59:59']);
+            $stmt->execute([$shopId, $startDate . ' 00:00:00', $endDate . ' 23:59:59']);
             $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
             return [
                 'source_available' => true,
@@ -894,7 +935,7 @@ class CommerceSopPacingService {
     /**
      * Queries real video analytics from commerce_video_analytics.
      */
-    private function queryVideoAnalytics(string $shopId, string $date): array {
+    private function queryVideoAnalytics(string $shopId, string $startDate, string $endDate): array {
         if (!$this->tableExists('commerce_video_analytics')) {
             return ['source_available' => false, 'video_count' => 0, 'total_views' => 0, 'attributed_gmv' => 0.0];
         }
@@ -905,8 +946,8 @@ class CommerceSopPacingService {
                 COALESCE(SUM(video_views), 0) AS total_views,
                 COALESCE(SUM(attributed_gmv), 0) AS attributed_gmv
             FROM `commerce_video_analytics`
-            WHERE shop_id = ? AND stat_date = ?");
-            $stmt->execute([$shopId, $date]);
+            WHERE shop_id = ? AND stat_date >= ? AND stat_date <= ?");
+            $stmt->execute([$shopId, $startDate, $endDate]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
             return [
                 'source_available' => true,

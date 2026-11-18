@@ -136,10 +136,14 @@ class CommerceAiDirectorService {
         }
 
         $endDate = trim((string)($params['end_date'] ?? $params['date'] ?? date('Y-m-d')));
-        $startDate = trim((string)($params['start_date'] ?? date('Y-m-d', strtotime($endDate . ' -6 days'))));
+        $startDate = trim((string)($params['start_date'] ?? ''));
 
         if ($normalizedMode === 'overview') {
-            return $this->analyzeOverview($shopId, $endDate, $params);
+            $ovStart = $startDate !== '' ? $startDate : $endDate;
+            return $this->analyzeOverview($shopId, $ovStart, $endDate, $params);
+        }
+        if ($startDate === '') {
+            $startDate = date('Y-m-d', strtotime($endDate . ' -6 days'));
         }
         if ($normalizedMode === 'campaign_video') {
             return $this->analyzeCampaignVideo($shopId, $startDate, $endDate, $params);
@@ -147,9 +151,13 @@ class CommerceAiDirectorService {
         return $this->analyzeLive($shopId, $startDate, $endDate, $params);
     }
 
-    private function analyzeOverview(string $shopId, string $date, array $params): array {
+    private function analyzeOverview(string $shopId, string $startDate, string $endDate, array $params): array {
         $pacingSvc = new CommerceSopPacingService($this->db);
-        $overview = $pacingSvc->getPacingOverview($shopId, $date);
+        $overview = $pacingSvc->getPacingOverview($shopId, $endDate, null, $startDate, $endDate);
+
+        $daysCount = max(1, (int)($overview['days_count'] ?? 1));
+        $isRange = $daysCount > 1;
+        $periodLabel = $isRange ? "Kỳ {$startDate} → {$endDate} ({$daysCount} ngày)" : "Ngày {$endDate}";
 
         $cfg = $overview['config'] ?? [];
         $pacing = $overview['pacing'] ?? [];
@@ -159,8 +167,8 @@ class CommerceAiDirectorService {
         $mainSku = $video['main_sku'] ?? [];
         $subSku = $video['sub_sku'] ?? [];
 
-        $dailyTarget = (float)($cfg['daily_gmv_target'] ?? 20000000);
-        $dailyCap = (float)($cfg['daily_spend_cap'] ?? 1538461);
+        $dailyTarget = (float)($total['target_gmv'] ?? ($cfg['daily_gmv_target'] ?? 20000000));
+        $dailyCap = (float)($total['daily_spend_cap'] ?? ($cfg['daily_spend_cap'] ?? 1538461));
         $targetRoi = (float)($cfg['target_roi'] ?? 13.0);
 
         $actualGmv = (float)($total['actual_gmv'] ?? 0);
@@ -181,7 +189,9 @@ class CommerceAiDirectorService {
         $subShare = $skuTotal > 0 ? round(($subGmv / $skuTotal) * 100, 1) : 0.0;
 
         $snapshot = [
-            'date' => $date,
+            'start_date' => $startDate,
+            'end_date' => $endDate,
+            'days_count' => $daysCount,
             'actual_gmv' => $actualGmv,
             'daily_gmv_target' => $dailyTarget,
             'actual_spend' => $actualSpend,
@@ -196,10 +206,10 @@ class CommerceAiDirectorService {
             'sub_sku_share_pct' => $subShare,
         ];
 
-        $prompt = "Bạn là Giám đốc Marketing Thực chiến cho gian hàng TikTok Shop. Hãy phân tích số liệu ngày {$date} bằng Tiếng Việt phổ thông, dễ hiểu cho chủ shop & nhân sự vận hành.\n"
-            . "QUY TẮC BẮT BUỘC: Tuyệt đối KHÔNG dùng từ chuyên môn tiếng Anh (cấm dùng ROAS, ROI, Pacing, Cap, MTD, CTR, CTOR, CVR, GMV). Hãy gọi là 'Doanh số', 'Tiền quảng cáo', 'Hiệu quả thu/chi', 'Giới hạn chi/ngày', 'Tiến độ doanh số'. Chỉ dùng đúng số liệu dưới đây:\n"
-            . "- Doanh số toàn gian hàng: " . $this->fmtVnd($actualGmv) . " / Mục tiêu ngày: " . $this->fmtVnd($dailyTarget) . " (Chênh lệch: {$gmvGapPct}%)\n"
-            . "- Tiền quảng cáo đã tiêu: " . $this->fmtVnd($actualSpend) . " / Giới hạn chi/ngày: " . $this->fmtVnd($dailyCap) . "\n"
+        $prompt = "Bạn là Giám đốc Marketing Thực chiến cho gian hàng TikTok Shop. Hãy phân tích số liệu {$periodLabel} bằng Tiếng Việt phổ thông, dễ hiểu cho chủ shop & nhân sự vận hành.\n"
+            . "QUY TẮC BẮT BUỘC: Tuyệt đối KHÔNG dùng từ chuyên môn tiếng Anh (cấm dùng ROAS, ROI, Pacing, Cap, MTD, CTR, CTOR, CVR, GMV). Hãy gọi là 'Doanh số', 'Tiền quảng cáo', 'Hiệu quả thu/chi', 'Giới hạn chi', 'Tiến độ doanh số'. Chỉ dùng đúng số liệu dưới đây:\n"
+            . "- Doanh số toàn gian hàng ({$periodLabel}): " . $this->fmtVnd($actualGmv) . " / Mục tiêu kỳ: " . $this->fmtVnd($dailyTarget) . " (Chênh lệch: {$gmvGapPct}%)\n"
+            . "- Tiền quảng cáo đã tiêu: " . $this->fmtVnd($actualSpend) . " / Giới hạn chi kỳ: " . $this->fmtVnd($dailyCap) . "\n"
             . "- Hiệu quả thu/chi thực tế: " . $this->fmtRatio($actualRoi) . " / Mục tiêu: " . $this->fmtRatio($targetRoi) . "\n"
             . "- Tỷ trọng kênh Video vs Live: Video " . $this->fmtVnd($videoGmv) . " ({$videoShare}% - mục tiêu 75%) | Live " . $this->fmtVnd($liveGmv) . " ({$liveShare}% - mục tiêu 25%)\n"
             . "- Tỷ trọng sản phẩm Chủ lực vs Sản phẩm phụ: Chủ lực {$mainShare}% (mục tiêu 80%) | Phụ {$subShare}% (mục tiêu 20%)\n\n"
@@ -218,13 +228,13 @@ class CommerceAiDirectorService {
 
             if ($actualGmv < $dailyTarget) {
                 $shortfall = $dailyTarget - $actualGmv;
-                $reasons[] = "Doanh số ngày {$date} mới đạt **" . $this->fmtVnd($actualGmv) . "**, còn thiếu **" . $this->fmtVnd($shortfall) . "** so với mục tiêu **" . $this->fmtVnd($dailyTarget) . "**.";
+                $reasons[] = "Doanh số {$periodLabel} mới đạt **" . $this->fmtVnd($actualGmv) . "**, còn thiếu **" . $this->fmtVnd($shortfall) . "** so với mục tiêu **" . $this->fmtVnd($dailyTarget) . "**.";
                 if ($actualSpend < $dailyCap * 0.7) {
-                    $reasons[] = "Tiền quảng cáo mới tiêu **" . $this->fmtVnd($actualSpend) . "** (chưa tới 70% giới hạn chi/ngày " . $this->fmtVnd($dailyCap) . "), cho thấy hệ thống chưa đủ video mới để cắn hết ngân sách.";
+                    $reasons[] = "Tiền quảng cáo mới tiêu **" . $this->fmtVnd($actualSpend) . "** (chưa tới 70% giới hạn chi " . $this->fmtVnd($dailyCap) . "), cho thấy hệ thống chưa đủ video mới để cắn hết ngân sách.";
                     $actions[] = "**Đội Nội dung & KOC:** Bổ sung ngay 10–15 video mới trong ngày, tập trung 3 giây đầu đánh trực diện nỗi đau nóng trong/gan yếu và giới thiệu Combo 2–3 hộp.";
                 }
             } else {
-                $reasons[] = "Doanh số ngày {$date} đạt **" . $this->fmtVnd($actualGmv) . "**, hoàn thành mục tiêu **" . $this->fmtVnd($dailyTarget) . "**.";
+                $reasons[] = "Doanh số {$periodLabel} đạt **" . $this->fmtVnd($actualGmv) . "**, hoàn thành mục tiêu **" . $this->fmtVnd($dailyTarget) . "**.";
             }
 
             if ($actualRoi !== null && $actualRoi < $targetRoi) {
@@ -246,10 +256,15 @@ class CommerceAiDirectorService {
                 $actions[] = "**Toàn đội:** Duy trì nhịp sản xuất 10–15 video/ngày, giữ vững 2 ca Live đều đặn và kiểm tra tồn kho mỗi sáng trước khi mở ngân sách.";
             }
 
-            $analysisText = "## Báo Cáo Giám Đốc Marketing — Tổng Quan Ngày {$date}\n\n"
+            $avgDailyLine = $isRange
+                ? "- **Trung bình mỗi ngày:** Doanh số " . $this->fmtVnd($actualGmv / $daysCount) . "/ngày | Tiền quảng cáo " . $this->fmtVnd($actualSpend / $daysCount) . "/ngày\n"
+                : '';
+
+            $analysisText = "## Báo Cáo Giám Đốc Marketing — {$periodLabel}\n\n"
                 . "### 1. Tình Hình Thực Tế So Với Mục Tiêu\n"
                 . "- **Doanh số toàn gian hàng:** " . $this->fmtVnd($actualGmv) . " / Mục tiêu " . $this->fmtVnd($dailyTarget) . "\n"
-                . "- **Tiền quảng cáo đã tiêu:** " . $this->fmtVnd($actualSpend) . " / Giới hạn chi/ngày " . $this->fmtVnd($dailyCap) . "\n"
+                . $avgDailyLine
+                . "- **Tiền quảng cáo đã tiêu:** " . $this->fmtVnd($actualSpend) . " / Giới hạn chi " . $this->fmtVnd($dailyCap) . "\n"
                 . "- **Hiệu quả thu/chi:** " . $this->fmtRatio($actualRoi) . " (Mục tiêu: " . $this->fmtRatio($targetRoi) . ")\n"
                 . "- **Tỷ trọng kênh:** Video {$videoShare}% (mục tiêu 75%) | Live {$liveShare}% (mục tiêu 25%)\n"
                 . "- **Tỷ trọng sản phẩm:** Chủ lực {$mainShare}% (mục tiêu 80%) | Phụ {$subShare}% (mục tiêu 20%)\n\n"
@@ -264,7 +279,9 @@ class CommerceAiDirectorService {
             'shop_id' => $shopId,
             'source' => $source,
             'model' => $ai['model'],
-            'headline' => $actualGmv >= $dailyTarget ? 'Đạt mục tiêu doanh số ngày' : 'Cần đẩy mạnh doanh số & tối ưu hiệu quả thu/chi',
+            'headline' => $actualGmv >= $dailyTarget
+                ? ($isRange ? "Đạt mục tiêu doanh số {$daysCount} ngày" : 'Đạt mục tiêu doanh số ngày')
+                : 'Cần đẩy mạnh doanh số & tối ưu hiệu quả thu/chi',
             'analysis_markdown' => $analysisText,
             'metrics_snapshot' => $snapshot,
             'generated_at' => date('Y-m-d H:i:s'),
