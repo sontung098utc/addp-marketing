@@ -11,6 +11,9 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/db.php';
+if (file_exists(__DIR__ . '/commerce_reporting_service.php')) {
+    require_once __DIR__ . '/commerce_reporting_service.php';
+}
 
 class CommerceSopPacingService {
     public const PLATFORM = 'tiktok_shop';
@@ -400,9 +403,24 @@ class CommerceSopPacingService {
 
         $config = $this->getConfig($shopId);
 
-        // 1. Real Orders & Shop GMV (Selected Period + Month-to-Date) from commerce_orders
+        // 1. Real Orders & Shop GMV (Selected Period + Month-to-Date)
+        // Use CommerceReportingService as the Single Source of Truth when available so numbers match "Báo cáo TikTok Shop" 100%
         $ordersDaily = $this->queryOrdersSummary($shopId, $periodStart, $periodEnd);
         $ordersMtd = $this->queryOrdersSummary($shopId, $monthStart, $periodEnd);
+        $periodReport = null;
+        $mtdReport = null;
+        if (class_exists('CommerceReportingService') && $this->db->getAttribute(PDO::ATTR_DRIVER_NAME) !== 'sqlite') {
+            try {
+                $reportingSvc = new CommerceReportingService($this->db);
+                $periodReport = $reportingSvc->getCommerceReport($shopId, $periodStart, $periodEnd);
+                $mtdReport = ($periodStart === $monthStart)
+                    ? $periodReport
+                    : $reportingSvc->getCommerceReport($shopId, $monthStart, $periodEnd);
+            } catch (\Throwable $t) {
+                $periodReport = null;
+                $mtdReport = null;
+            }
+        }
 
         // 2. Main SKU vs Secondary SKUs GMV from commerce_order_items + commerce_orders
         $skuSplitDaily = $this->querySkuSplitGmv(
@@ -422,32 +440,55 @@ class CommerceSopPacingService {
         // 5. Real Video Analytics from commerce_video_analytics
         $videoStats = $this->queryVideoAnalytics($shopId, $periodStart, $periodEnd);
 
-        // Combine & compute metrics
-        $totalShopGmv = $ordersDaily['gross_gmv'];
-        $totalShopOrders = $ordersDaily['order_count'];
-        $totalSpend = $adsData['total_spend'];
-        $totalAdsGmv = $adsData['total_ads_gmv'];
-        $totalAdsOrders = $adsData['total_ads_orders'];
+        // Combine & compute metrics (preferring CommerceReportingService authoritative figures)
+        $repSummary = is_array($periodReport) ? ($periodReport['summary'] ?? []) : [];
+        $repAds = is_array($periodReport) ? ($periodReport['advertising'] ?? []) : [];
+        $repAdsTotal = $repAds['total'] ?? [];
+        $repAdsProd = $repAds['product_gmv_max'] ?? [];
+        $repAdsLive = $repAds['live_gmv_max'] ?? [];
+        $mtdSummary = is_array($mtdReport) ? ($mtdReport['summary'] ?? []) : [];
+
+        $hasRepSummary = !empty($repSummary) && isset($repSummary['realized_revenue']);
+        $totalShopGmv = $hasRepSummary ? (float)$repSummary['realized_revenue'] : $ordersDaily['gross_gmv'];
+        $totalShopGrossGmv = $hasRepSummary ? (float)($repSummary['gross_sales'] ?? $totalShopGmv) : $ordersDaily['gross_gmv'];
+        $totalShopLoss = $hasRepSummary ? (float)($repSummary['loss_amount'] ?? 0) : 0.0;
+        $totalShopOrders = $hasRepSummary ? (int)($repSummary['total_orders'] ?? $ordersDaily['order_count']) : $ordersDaily['order_count'];
+
+        $mtdShopGmv = (!empty($mtdSummary) && isset($mtdSummary['realized_revenue']))
+            ? (float)$mtdSummary['realized_revenue']
+            : $ordersMtd['gross_gmv'];
+        $mtdShopOrders = (!empty($mtdSummary) && isset($mtdSummary['total_orders']))
+            ? (int)$mtdSummary['total_orders']
+            : $ordersMtd['order_count'];
+
+        $hasRepAds = !empty($repAdsTotal) && isset($repAdsTotal['cost']);
+        $totalSpend = $hasRepAds ? (float)$repAdsTotal['cost'] : $adsData['total_spend'];
+        $totalAdsGmv = $hasRepAds ? (float)($repAdsTotal['attributed_gross_revenue'] ?? 0) : $adsData['total_ads_gmv'];
+        $totalAdsOrders = $hasRepAds ? (int)($repAdsTotal['orders'] ?? 0) : $adsData['total_ads_orders'];
         $totalClicks = $adsData['total_clicks'];
         $totalImpressions = $adsData['total_impressions'];
 
-        // Shop ROI uses shop GMV / total ads spend (and we also expose ads_roi = ads_gmv / spend)
+        // Shop ROI uses shop realized GMV / total ads spend (and ads_roi = ads_gmv / spend)
         $shopActualRoi = $totalSpend > 0 ? round($totalShopGmv / $totalSpend, 2) : null;
         $adsActualRoi = $totalSpend > 0 ? round($totalAdsGmv / $totalSpend, 2) : null;
 
-        $videoSpend = $adsData['video_spend'];
-        $videoAdsGmv = $adsData['video_ads_gmv'];
-        $videoOrders = $adsData['video_orders'];
+        $videoSpend = $hasRepAds ? (float)($repAdsProd['cost'] ?? $adsData['video_spend']) : $adsData['video_spend'];
+        $videoAdsGmv = $hasRepAds ? (float)($repAdsProd['attributed_gross_revenue'] ?? $adsData['video_ads_gmv']) : $adsData['video_ads_gmv'];
+        $videoOrders = $hasRepAds ? (int)($repAdsProd['orders'] ?? $adsData['video_orders']) : $adsData['video_orders'];
         $videoClicks = $adsData['video_clicks'];
         $videoRoi = $videoSpend > 0 ? round($videoAdsGmv / $videoSpend, 2) : null;
 
-        $liveSpend = $adsData['live_spend'];
-        // Prefer LIVE Ads GMV for Ads ROI, and also track organic+ads session GMV from commerce_live_sessions
-        $liveAdsGmv = $adsData['live_ads_gmv'];
+        $liveSpend = $hasRepAds ? (float)($repAdsLive['cost'] ?? $adsData['live_spend']) : $adsData['live_spend'];
+        $liveAdsGmv = $hasRepAds ? (float)($repAdsLive['attributed_gross_revenue'] ?? $adsData['live_ads_gmv']) : $adsData['live_ads_gmv'];
         $liveSessionGmv = $liveSessions['total_gmv'];
-        $liveEffectiveGmv = $liveSessionGmv > 0 ? $liveSessionGmv : $liveAdsGmv;
+        $liveEffectiveGmv = $liveAdsGmv > 0 ? $liveAdsGmv : $liveSessionGmv;
         $liveRoi = $liveSpend > 0 ? round($liveAdsGmv / $liveSpend, 2) : null;
         $liveBlendedRoi = $liveSpend > 0 ? round($liveEffectiveGmv / $liveSpend, 2) : null;
+
+        $liveSessionCount = (int)$liveSessions['session_count'];
+        if ($liveSessionCount === 0 && !empty($adsData['live_active_days_count'])) {
+            $liveSessionCount = (int)$adsData['live_active_days_count'];
+        }
 
         // Period-scaled targets (1 day = daily targets, N days = daily * N)
         $periodGmvTarget = round($config['daily_gmv_target'] * $daysCount, 2);
@@ -468,7 +509,7 @@ class CommerceSopPacingService {
             ? round(($totalSpend / $periodSpendCap) * 100.0, 1)
             : 0.0;
         $monthlyGmvPacingPct = $config['monthly_gmv_target'] > 0
-            ? round(($ordersMtd['gross_gmv'] / $config['monthly_gmv_target']) * 100.0, 1)
+            ? round(($mtdShopGmv / $config['monthly_gmv_target']) * 100.0, 1)
             : 0.0;
 
         $videoSpendCapPct = $periodVideoSpendCap > 0
@@ -571,6 +612,8 @@ class CommerceSopPacingService {
             'pacing' => [
                 'total_shop' => [
                     'actual_gmv' => round($totalShopGmv, 2),
+                    'gross_gmv' => round($totalShopGrossGmv, 2),
+                    'loss_amount' => round($totalShopLoss, 2),
                     'avg_daily_gmv' => round($totalShopGmv / $daysCount, 2),
                     'target_gmv' => $periodGmvTarget,
                     'gmv_pacing_pct' => $dailyGmvPacingPct,
@@ -585,8 +628,8 @@ class CommerceSopPacingService {
                     'target_roi' => $config['target_roi'],
                     'clicks' => $totalClicks,
                     'impressions' => $totalImpressions,
-                    'mtd_gmv' => round($ordersMtd['gross_gmv'], 2),
-                    'mtd_orders' => $ordersMtd['order_count'],
+                    'mtd_gmv' => round($mtdShopGmv, 2),
+                    'mtd_orders' => $mtdShopOrders,
                     'monthly_gmv_target' => $config['monthly_gmv_target'],
                     'monthly_gmv_pacing_pct' => $monthlyGmvPacingPct,
                 ],
@@ -635,7 +678,7 @@ class CommerceSopPacingService {
                     'actual_roi' => $liveRoi,
                     'blended_roi' => $liveBlendedRoi,
                     'target_roi' => $config['live_target_roi'],
-                    'sessions_today' => $liveSessions['session_count'],
+                    'sessions_today' => $liveSessionCount,
                     'sessions_target' => $periodLiveSessionsTarget,
                     'per_session_gmv_target' => $config['live_per_session_gmv_target'],
                     'live_views_today' => $liveSessions['total_views'],
@@ -766,6 +809,7 @@ class CommerceSopPacingService {
             'live_ads_gmv' => 0.0,
             'live_orders' => 0,
             'live_clicks' => 0,
+            'live_active_days_count' => 0,
             'campaigns' => [],
         ];
 
@@ -782,9 +826,10 @@ class CommerceSopPacingService {
                     COALESCE(SUM(gross_revenue), 0) AS ads_gmv,
                     COALESCE(SUM(orders), 0) AS orders,
                     COALESCE(SUM(clicks), 0) AS clicks,
-                    COALESCE(SUM(impressions), 0) AS impressions
+                    COALESCE(SUM(impressions), 0) AS impressions,
+                    COUNT(DISTINCT CASE WHEN spend > 0 THEN stat_date ELSE NULL END) AS active_days
                 FROM `commerce_ads_campaign_daily`
-                WHERE shop_id = ? AND stat_date >= ? AND stat_date <= ?
+                WHERE (shop_id = ? OR shop_id = '' OR shop_id IS NULL) AND stat_date >= ? AND stat_date <= ?
                 GROUP BY campaign_id
                 ORDER BY spend DESC");
                 $stmt->execute([$shopId, $startDate, $endDate]);
@@ -814,6 +859,7 @@ class CommerceSopPacingService {
                         $result['live_ads_gmv'] += $gmv;
                         $result['live_orders'] += $orders;
                         $result['live_clicks'] += $clicks;
+                        $result['live_active_days_count'] += (int)($r['active_days'] ?? 0);
                     } else {
                         $result['video_spend'] += $spend;
                         $result['video_ads_gmv'] += $gmv;

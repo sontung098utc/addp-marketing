@@ -1014,6 +1014,11 @@ export default function CommerceSopCommandCenterView({
               <span style={{ fontWeight: '700', color: '#0f172a' }}>{formatVND(shop.actual_gmv)} / {formatVND(shop.target_gmv)} ({shop.gmv_pacing_pct || 0}%)</span>
             </div>
             <ProgressBar pct={shop.gmv_pacing_pct} color="#2563eb" />
+            {(shop.gross_gmv > 0 && shop.gross_gmv > shop.actual_gmv) && (
+              <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
+                Doanh số gộp (trước hủy/hoàn): <strong>{formatVND(shop.gross_gmv)}</strong> • Hủy/hoàn: <strong style={{ color: '#dc2626' }}>-{formatVND(shop.loss_amount || 0)}</strong>
+              </div>
+            )}
             {(data?.days_count || 1) > 1 && (
               <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
                 Trung bình/ngày: <strong>{formatVND(shop.avg_daily_gmv || 0)}</strong> (Mục tiêu/ngày: {formatVND(config.daily_gmv_target)})

@@ -1724,69 +1724,121 @@ try {
                 $runId = $analyticsService->syncShopDailyAnalytics($shopId, $startDate, $endDate);
                 echo json_encode(['success' => true, 'message' => "Đã kích hoạt đồng bộ Analytics run #{$runId}", 'run_id' => $runId]);
             } elseif ($domain === 'ads_campaigns' || $domain === 'ads') {
-                $ingestionService = new CommerceAdsIngestionService($db);
-                $syncRes = $ingestionService->syncCampaignDailyRange($shopId, $startDate, $endDate, false);
-                echo json_encode(['success' => true, 'message' => "Đã xử lý đồng bộ báo cáo chiến dịch quảng cáo", 'data' => $syncRes], JSON_UNESCAPED_UNICODE);
+                @set_time_limit(120);
+                try {
+                    $ingestionService = new CommerceAdsIngestionService($db);
+                    $syncRes = $ingestionService->syncCampaignDailyRange($shopId, $startDate, $endDate, false);
+                    echo json_encode(['success' => true, 'message' => "Đã xử lý đồng bộ báo cáo chiến dịch quảng cáo", 'data' => $syncRes], JSON_UNESCAPED_UNICODE);
+                } catch (\Throwable $syncErr) {
+                    echo json_encode(['success' => false, 'message' => 'Lỗi đồng bộ chiến dịch Ads: ' . $syncErr->getMessage()], JSON_UNESCAPED_UNICODE);
+                }
             } elseif ($domain === 'ads_products') {
-                $ingestionService = new CommerceAdsIngestionService($db);
-                $campStmt = $db->prepare("SELECT DISTINCT campaign_id FROM `commerce_ads_campaign_daily` 
-                    WHERE shop_id = ? AND promotion_type = 'PRODUCT' AND stat_date >= ? AND stat_date <= ?");
-                $campStmt->execute([$shopId, $startDate, $endDate]);
-                $campIds = $campStmt->fetchAll(PDO::FETCH_COLUMN);
-                if (empty($campIds)) {
-                    $campStmt2 = $db->prepare("SELECT DISTINCT campaign_id FROM `commerce_ads_campaign_daily` 
-                        WHERE shop_id = ? AND campaign_type NOT LIKE '%LIVE%' AND stat_date >= ? AND stat_date <= ?");
-                    $campStmt2->execute([$shopId, $startDate, $endDate]);
-                    $campIds = $campStmt2->fetchAll(PDO::FETCH_COLUMN);
+                @set_time_limit(120);
+                try {
+                    $ingestionService = new CommerceAdsIngestionService($db);
+                    $campStmt = $db->prepare("SELECT DISTINCT campaign_id FROM `commerce_ads_campaign_daily` 
+                        WHERE (shop_id = ? OR shop_id = '' OR shop_id IS NULL) AND promotion_type = 'PRODUCT' AND stat_date >= ? AND stat_date <= ?");
+                    $campStmt->execute([$shopId, $startDate, $endDate]);
+                    $campIds = $campStmt->fetchAll(PDO::FETCH_COLUMN);
+                    if (empty($campIds)) {
+                        $campStmt2 = $db->prepare("SELECT DISTINCT campaign_id FROM `commerce_ads_campaign_daily` 
+                            WHERE (shop_id = ? OR shop_id = '' OR shop_id IS NULL) AND campaign_type NOT LIKE '%LIVE%' AND stat_date >= ? AND stat_date <= ?");
+                        $campStmt2->execute([$shopId, $startDate, $endDate]);
+                        $campIds = $campStmt2->fetchAll(PDO::FETCH_COLUMN);
+                    }
+                    $syncRes = $ingestionService->syncProductDailyRange($shopId, $startDate, $endDate, $campIds);
+                    echo json_encode(['success' => true, 'message' => "Đã xử lý đồng bộ sản phẩm GMV Max", 'data' => $syncRes], JSON_UNESCAPED_UNICODE);
+                } catch (\Throwable $syncErr) {
+                    echo json_encode(['success' => false, 'message' => 'Lỗi đồng bộ sản phẩm GMV Max: ' . $syncErr->getMessage()], JSON_UNESCAPED_UNICODE);
                 }
-                $syncRes = $ingestionService->syncProductDailyRange($shopId, $startDate, $endDate, $campIds);
-                echo json_encode(['success' => true, 'message' => "Đã xử lý đồng bộ sản phẩm GMV Max", 'data' => $syncRes], JSON_UNESCAPED_UNICODE);
             } elseif ($domain === 'ads_creatives') {
-                $ingestionService = new CommerceAdsIngestionService($db);
-                // Synchronize creative reports respecting Campaign -> its own SPU hierarchy
-                $syncRes = $ingestionService->syncCreativeDailyRange($shopId, $startDate, $endDate);
-                echo json_encode(['success' => true, 'message' => "Đã xử lý đồng bộ creative video GMV Max", 'data' => $syncRes], JSON_UNESCAPED_UNICODE);
-            } elseif ($domain === 'ads_lives') {
-                $ingestionService = new CommerceAdsIngestionService($db);
-                $campStmt = $db->prepare("SELECT DISTINCT campaign_id FROM `commerce_ads_campaign_daily` 
-                    WHERE shop_id = ? AND promotion_type = 'LIVE' AND stat_date >= ? AND stat_date <= ?");
-                $campStmt->execute([$shopId, $startDate, $endDate]);
-                $campIds = $campStmt->fetchAll(PDO::FETCH_COLUMN);
-                if (empty($campIds)) {
-                    $campStmt2 = $db->prepare("SELECT DISTINCT campaign_id FROM `commerce_ads_campaign_daily` 
-                        WHERE shop_id = ? AND campaign_type LIKE '%LIVE%' AND stat_date >= ? AND stat_date <= ?");
-                    $campStmt2->execute([$shopId, $startDate, $endDate]);
-                    $campIds = $campStmt2->fetchAll(PDO::FETCH_COLUMN);
+                @set_time_limit(120);
+                try {
+                    $ingestionService = new CommerceAdsIngestionService($db);
+                    $syncRes = $ingestionService->syncCreativeDailyRange($shopId, $startDate, $endDate);
+                    echo json_encode(['success' => true, 'message' => "Đã xử lý đồng bộ creative video GMV Max", 'data' => $syncRes], JSON_UNESCAPED_UNICODE);
+                } catch (\Throwable $syncErr) {
+                    echo json_encode(['success' => false, 'message' => 'Lỗi đồng bộ Video GMV Max: ' . $syncErr->getMessage()], JSON_UNESCAPED_UNICODE);
                 }
-                $syncRes = $ingestionService->syncLiveDailyRange($shopId, $startDate, $endDate, $campIds);
-                echo json_encode(['success' => true, 'message' => "Đã xử lý đồng bộ LIVE GMV Max", 'data' => $syncRes], JSON_UNESCAPED_UNICODE);
+            } elseif ($domain === 'ads_lives') {
+                @set_time_limit(120);
+                try {
+                    $ingestionService = new CommerceAdsIngestionService($db);
+                    $campStmt = $db->prepare("SELECT DISTINCT campaign_id FROM `commerce_ads_campaign_daily` 
+                        WHERE (shop_id = ? OR shop_id = '' OR shop_id IS NULL) AND promotion_type = 'LIVE' AND stat_date >= ? AND stat_date <= ?");
+                    $campStmt->execute([$shopId, $startDate, $endDate]);
+                    $campIds = $campStmt->fetchAll(PDO::FETCH_COLUMN);
+                    if (empty($campIds)) {
+                        $campStmt2 = $db->prepare("SELECT DISTINCT campaign_id FROM `commerce_ads_campaign_daily` 
+                            WHERE (shop_id = ? OR shop_id = '' OR shop_id IS NULL) AND campaign_type LIKE '%LIVE%' AND stat_date >= ? AND stat_date <= ?");
+                        $campStmt2->execute([$shopId, $startDate, $endDate]);
+                        $campIds = $campStmt2->fetchAll(PDO::FETCH_COLUMN);
+                    }
+                    $syncRes = $ingestionService->syncLiveDailyRange($shopId, $startDate, $endDate, $campIds);
+                    echo json_encode(['success' => true, 'message' => "Đã xử lý đồng bộ LIVE GMV Max", 'data' => $syncRes], JSON_UNESCAPED_UNICODE);
+                } catch (\Throwable $syncErr) {
+                    echo json_encode(['success' => false, 'message' => 'Lỗi đồng bộ LIVE GMV Max: ' . $syncErr->getMessage()], JSON_UNESCAPED_UNICODE);
+                }
             } elseif ($domain === 'ads_all') {
+                @set_time_limit(180);
                 $ingestionService = new CommerceAdsIngestionService($db);
-                $campRes = $ingestionService->syncCampaignDailyRange($shopId, $startDate, $endDate, false);
+                $campRes = null; $prodRes = null; $creatRes = null; $liveRes = null;
+                $stepErrors = [];
 
-                // 2. Product sync
-                $prodCampStmt = $db->prepare("SELECT DISTINCT campaign_id FROM `commerce_ads_campaign_daily` 
-                    WHERE shop_id = ? AND promotion_type = 'PRODUCT' AND stat_date >= ? AND stat_date <= ?");
-                $prodCampStmt->execute([$shopId, $startDate, $endDate]);
-                $prodCampIds = $prodCampStmt->fetchAll(PDO::FETCH_COLUMN);
-                $prodRes = !empty($prodCampIds) ? $ingestionService->syncProductDailyRange($shopId, $startDate, $endDate, $prodCampIds) : null;
+                try {
+                    $campRes = $ingestionService->syncCampaignDailyRange($shopId, $startDate, $endDate, false);
+                } catch (\Throwable $e1) {
+                    $stepErrors[] = 'Chiến dịch: ' . $e1->getMessage();
+                }
 
-                // 3. Creative sync (respects Campaign -> SPU hierarchy from product facts)
-                $creatRes = $ingestionService->syncCreativeDailyRange($shopId, $startDate, $endDate);
+                try {
+                    $prodCampStmt = $db->prepare("SELECT DISTINCT campaign_id FROM `commerce_ads_campaign_daily` 
+                        WHERE (shop_id = ? OR shop_id = '' OR shop_id IS NULL) AND promotion_type = 'PRODUCT' AND stat_date >= ? AND stat_date <= ?");
+                    $prodCampStmt->execute([$shopId, $startDate, $endDate]);
+                    $prodCampIds = $prodCampStmt->fetchAll(PDO::FETCH_COLUMN);
+                    if (!empty($prodCampIds)) {
+                        $prodRes = $ingestionService->syncProductDailyRange($shopId, $startDate, $endDate, $prodCampIds);
+                    }
+                } catch (\Throwable $e2) {
+                    $stepErrors[] = 'Sản phẩm: ' . $e2->getMessage();
+                }
 
-                // 4. LIVE sync
-                $liveCampStmt = $db->prepare("SELECT DISTINCT campaign_id FROM `commerce_ads_campaign_daily` 
-                    WHERE shop_id = ? AND promotion_type = 'LIVE' AND stat_date >= ? AND stat_date <= ?");
-                $liveCampStmt->execute([$shopId, $startDate, $endDate]);
-                $liveCampIds = $liveCampStmt->fetchAll(PDO::FETCH_COLUMN);
-                $liveRes = !empty($liveCampIds) ? $ingestionService->syncLiveDailyRange($shopId, $startDate, $endDate, $liveCampIds) : null;
+                try {
+                    $creatRes = $ingestionService->syncCreativeDailyRange($shopId, $startDate, $endDate);
+                } catch (\Throwable $e3) {
+                    $stepErrors[] = 'Video: ' . $e3->getMessage();
+                }
 
-                echo json_encode(['success' => true, 'message' => "Đã xử lý đồng bộ toàn diện quảng cáo GMV Max", 'data' => [
-                    'campaigns' => $campRes,
-                    'products' => $prodRes,
-                    'creatives' => $creatRes,
-                    'lives' => $liveRes
-                ]], JSON_UNESCAPED_UNICODE);
+                try {
+                    $liveCampStmt = $db->prepare("SELECT DISTINCT campaign_id FROM `commerce_ads_campaign_daily` 
+                        WHERE (shop_id = ? OR shop_id = '' OR shop_id IS NULL) AND promotion_type = 'LIVE' AND stat_date >= ? AND stat_date <= ?");
+                    $liveCampStmt->execute([$shopId, $startDate, $endDate]);
+                    $liveCampIds = $liveCampStmt->fetchAll(PDO::FETCH_COLUMN);
+                    if (!empty($liveCampIds)) {
+                        $liveRes = $ingestionService->syncLiveDailyRange($shopId, $startDate, $endDate, $liveCampIds);
+                    }
+                } catch (\Throwable $e4) {
+                    $stepErrors[] = 'LIVE: ' . $e4->getMessage();
+                }
+
+                $hasAnySuccess = ($campRes !== null || $prodRes !== null || $creatRes !== null || $liveRes !== null);
+                $msg = empty($stepErrors)
+                    ? "Đã đồng bộ thành công số liệu quảng cáo thực tế từ TikTok ({$startDate} → {$endDate})."
+                    : ($hasAnySuccess
+                        ? "Đã đồng bộ một phần số liệu từ TikTok. Lưu ý: " . implode(' | ', $stepErrors)
+                        : "Không thể đồng bộ từ TikTok: " . implode(' | ', $stepErrors));
+
+                echo json_encode([
+                    'success' => $hasAnySuccess,
+                    'message' => $msg,
+                    'data' => [
+                        'campaigns' => $campRes,
+                        'products' => $prodRes,
+                        'creatives' => $creatRes,
+                        'lives' => $liveRes,
+                        'errors' => $stepErrors
+                    ]
+                ], JSON_UNESCAPED_UNICODE);
             } elseif ($domain === 'customer' || $domain === 'customer_ingestion' || $domain === 'customers') {
                 $orchestrator = new CommerceSyncOrchestrator($db);
                 $custRes = $orchestrator->syncCustomerDomain($shopId, $startDate, $endDate);
