@@ -2520,43 +2520,113 @@ try {
             $stmtLiveAds = $db->prepare("SELECT 
                 COALESCE(SUM(spend), 0.0) as live_spend,
                 COALESCE(SUM(gross_revenue), 0.0) as attributed_live_gmv,
-                COALESCE(SUM(orders), 0) as attributed_live_orders
+                COALESCE(SUM(orders), 0) as attributed_live_orders,
+                COUNT(DISTINCT CASE WHEN spend > 0 OR gross_revenue > 0 OR orders > 0 THEN stat_date ELSE NULL END) as active_live_days
                 FROM `commerce_ads_campaign_daily` 
-                WHERE shop_id = :s 
+                WHERE (shop_id = :s OR shop_id = '' OR shop_id IS NULL)
                   AND stat_date >= :sdate AND stat_date <= :edate 
-                  AND (campaign_type LIKE '%LIVE%' OR prom_type = 'LIVE' OR campaign_name LIKE '%LIVE%')");
+                  AND (campaign_type LIKE '%LIVE%' OR promotion_type = 'LIVE' OR campaign_name LIKE '%LIVE%')");
             $stmtLiveAds->execute([':s' => $shopId, ':sdate' => $startDate, ':edate' => $endDate]);
             $adsRow = $stmtLiveAds->fetch(PDO::FETCH_ASSOC) ?: [];
 
             $liveAdSpend = (float)($adsRow['live_spend'] ?? 0.0);
             $attributedLiveGmv = (float)($adsRow['attributed_live_gmv'] ?? 0.0);
             $attributedLiveOrders = (int)($adsRow['attributed_live_orders'] ?? 0);
+            $activeLiveDays = (int)($adsRow['active_live_days'] ?? 0);
 
-            // Ads ROAS is strictly Attributed GMV / Live Ad Spend; Blended ROAS is Total Live GMV / Live Ad Spend
+            // Fallback to commerce_ads_live_daily if campaign table had 0 live spend
+            if ($liveAdSpend <= 0 && $attributedLiveGmv <= 0) {
+                try {
+                    $chkLiveTbl = $db->query("SHOW TABLES LIKE 'commerce_ads_live_daily'")->fetch();
+                    if ($chkLiveTbl) {
+                        $stmtRoomAds = $db->prepare("SELECT
+                            COALESCE(SUM(cost), 0.0) as live_spend,
+                            COALESCE(SUM(ads_gross_revenue), 0.0) as attributed_live_gmv,
+                            COALESCE(SUM(orders), 0) as attributed_live_orders,
+                            COUNT(DISTINCT room_id) as rooms_count
+                            FROM `commerce_ads_live_daily`
+                            WHERE (shop_id = :s OR shop_id = '' OR shop_id IS NULL)
+                              AND stat_date >= :sdate AND stat_date <= :edate");
+                        $stmtRoomAds->execute([':s' => $shopId, ':sdate' => $startDate, ':edate' => $endDate]);
+                        $rRow = $stmtRoomAds->fetch(PDO::FETCH_ASSOC) ?: [];
+                        $liveAdSpend = (float)($rRow['live_spend'] ?? 0.0);
+                        $attributedLiveGmv = (float)($rRow['attributed_live_gmv'] ?? 0.0);
+                        $attributedLiveOrders = (int)($rRow['attributed_live_orders'] ?? 0);
+                    }
+                } catch (\Throwable $t) {}
+            }
+
+            // If commerce_live_sessions has 0 GMV in period, fallback total_gmv & total_orders to attributed LIVE Ads GMV
+            $effectiveLiveGmv = $liveGmv > 0 ? $liveGmv : $attributedLiveGmv;
+            $effectiveLiveOrders = $liveOrders > 0 ? $liveOrders : $attributedLiveOrders;
+            $effectiveSessionsCount = (int)($lRow['sessions_count'] ?? 0);
+            if ($effectiveSessionsCount === 0 && $activeLiveDays > 0) {
+                $effectiveSessionsCount = $activeLiveDays;
+            }
+            if ((int)($lRow['total_duration'] ?? 0) <= 0 && $effectiveSessionsCount > 0) {
+                $liveHours = max(1.0, $effectiveSessionsCount * 3.0);
+            }
+
+            // Compute shop cancellation & refund rate in period to report net realized LIVE revenue
+            $shopLossRate = 0.0;
+            try {
+                $stmtLossRate = $db->prepare("SELECT
+                    COALESCE(SUM(order_gross_amount), 0.0) as shop_gross,
+                    COALESCE(SUM(CASE WHEN order_status IN ('CANCELLED','RETURNED','REFUNDED') THEN order_gross_amount ELSE 0 END), 0.0) as shop_loss
+                    FROM `commerce_orders`
+                    WHERE shop_id = :s AND platform_created_at >= :sdt AND platform_created_at <= :edt");
+                $stmtLossRate->execute([
+                    ':s' => $shopId,
+                    ':sdt' => $startDate . ' 00:00:00',
+                    ':edt' => $endDate . ' 23:59:59'
+                ]);
+                $lrRow = $stmtLossRate->fetch(PDO::FETCH_ASSOC) ?: [];
+                $sGross = (float)($lrRow['shop_gross'] ?? 0.0);
+                $sLoss = (float)($lrRow['shop_loss'] ?? 0.0);
+                if ($sGross > 0) {
+                    $shopLossRate = min(1.0, max(0.0, $sLoss / $sGross));
+                }
+            } catch (\Throwable $t) {}
+
+            $liveCancelRefundLoss = round($effectiveLiveGmv * $shopLossRate, 0);
+            $realizedLiveGmv = max(0.0, round($effectiveLiveGmv - $liveCancelRefundLoss, 0));
+            $realizedAttributedLiveGmv = max(0.0, round($attributedLiveGmv * (1.0 - $shopLossRate), 0));
+
+            // Ads ROAS is Attributed GMV / Live Ad Spend; Realized Ads ROAS deducts cancellation/refunds
             $adsRoas = $liveAdSpend > 0 ? round($attributedLiveGmv / $liveAdSpend, 2) : null;
-            $blendedLiveRoas = $liveAdSpend > 0 ? round($liveGmv / $liveAdSpend, 2) : null;
+            $realizedAdsRoas = $liveAdSpend > 0 ? round($realizedAttributedLiveGmv / $liveAdSpend, 2) : null;
+            $blendedLiveRoas = $liveAdSpend > 0 ? round($effectiveLiveGmv / $liveAdSpend, 2) : null;
+            $realizedBlendedLiveRoas = $liveAdSpend > 0 ? round($realizedLiveGmv / $liveAdSpend, 2) : null;
 
             $liveKpis = [
                 'impressions' => $liveImps,
                 'total_views' => $liveViews,
-                'gmv_per_hour' => round($liveGmv / $liveHours, 2),
+                'gmv_per_hour' => round($effectiveLiveGmv / $liveHours, 2),
+                'realized_gmv_per_hour' => round($realizedLiveGmv / $liveHours, 2),
                 'impressions_per_hour' => round($liveImps / $liveHours, 0),
-                'gpm' => $liveImps > 0 ? round(($liveGmv / $liveImps) * 1000, 2) : 0.0,
+                'gpm' => $liveImps > 0 ? round(($effectiveLiveGmv / $liveImps) * 1000, 2) : 0.0,
                 'comment_rate' => $liveViews > 0 ? round(($liveComments / $liveViews) * 100, 2) : 0.0,
                 'follow_rate' => $liveViews > 0 ? round(($liveFollows / $liveViews) * 100, 2) : 0.0,
                 'enter_room_rate' => $liveImps > 0 ? round(($liveViews / $liveImps) * 100, 2) : 0.0,
                 'share_rate' => $liveViews > 0 ? round(($liveShares / $liveViews) * 100, 2) : 0.0,
                 'ctr_live' => $liveViews > 0 ? round(($liveClicks / $liveViews) * 100, 2) : 0.0,
-                'sku_order_rate' => $liveClicks > 0 ? round(($liveOrders / $liveClicks) * 100, 2) : 0.0,
-                'ads_roi' => $adsRoas, // Corrected per P0-03: Ads ROI = Attributed Ads ROAS
-                'ads_roas' => $adsRoas,
+                'sku_order_rate' => $liveClicks > 0 ? round(($effectiveLiveOrders / $liveClicks) * 100, 2) : 0.0,
+                'ads_roi' => $realizedAdsRoas ?? $adsRoas,
+                'ads_roas' => $realizedAdsRoas ?? $adsRoas,
+                'gross_ads_roas' => $adsRoas,
+                'realized_ads_roas' => $realizedAdsRoas,
                 'attributed_live_gmv' => $attributedLiveGmv,
+                'realized_attributed_live_gmv' => $realizedAttributedLiveGmv,
                 'attributed_live_orders' => $attributedLiveOrders,
-                'blended_live_roas' => $blendedLiveRoas, // Blended Live GMV / Spend
+                'blended_live_roas' => $realizedBlendedLiveRoas ?? $blendedLiveRoas,
+                'gross_blended_live_roas' => $blendedLiveRoas,
                 'ad_spend' => $liveAdSpend,
-                'total_gmv' => $liveGmv,
-                'total_orders' => $liveOrders,
-                'sessions_count' => (int)($lRow['sessions_count'] ?? 0),
+                'total_gmv' => $effectiveLiveGmv,
+                'realized_gmv' => $realizedLiveGmv,
+                'cancel_refund_loss' => $liveCancelRefundLoss,
+                'cancel_refund_rate_pct' => round($shopLossRate * 100, 1),
+                'total_orders' => $effectiveLiveOrders,
+                'sessions_count' => $effectiveSessionsCount,
                 'data_freshness' => date('Y-m-d H:i:s'),
                 'source_attribution' => [
                     'sessions_source' => 'TIKTOK_SHOP_LIVE_API',
@@ -2569,8 +2639,8 @@ try {
                     'follow_rate' => 1.0,
                     'gpm' => 70000.0,
                     'gmv_per_hour' => 600000.0,
-                    'ads_roi' => 15.0,
-                    'blended_live_roas' => 20.0,
+                    'ads_roi' => 13.0,
+                    'blended_live_roas' => 15.0,
                     'min_ad_budget_per_session' => 100000.0
                 ]
             ];
@@ -3465,6 +3535,19 @@ try {
             echo json_encode([
                 'success' => true,
                 'data' => $analysis
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'get_video_product_intelligence':
+            require_once __DIR__ . '/commerce_video_product_service.php';
+            $vpService = new CommerceVideoProductService($db);
+            $targetRoiVal = isset($_GET['target_roi']) && is_numeric($_GET['target_roi']) ? (float)$_GET['target_roi'] : null;
+            $vpData = $vpService->getVideoProductIntelligence($shopId, $startDate, $endDate, [
+                'target_roi' => $targetRoiVal
+            ]);
+            echo json_encode([
+                'success' => true,
+                'data' => $vpData
             ], JSON_UNESCAPED_UNICODE);
             break;
 

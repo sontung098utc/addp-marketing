@@ -750,6 +750,125 @@ class CommerceAdsService {
             'applied_benchmark_roi' => $appliedShopBenchmarkRoi
         ];
 
+        // Compute shop cancellation & refund rate + load Product Catalog & Order Items for Campaign -> Product Breakdown
+        $shopCancelRate = 0.0;
+        $shopRefundRate = 0.0;
+        $shopLossRate = 0.0;
+        $productMetaMap = [];
+        $campaignProductsMap = [];
+
+        try {
+            $stmtLoss = $this->db->prepare("SELECT
+                COALESCE(SUM(order_gross_amount), 0.0) as shop_gross,
+                COALESCE(SUM(CASE WHEN order_status = 'CANCELLED' THEN order_gross_amount ELSE 0 END), 0.0) as cancel_gross,
+                COALESCE(SUM(CASE WHEN order_status IN ('RETURNED','REFUNDED') THEN order_gross_amount ELSE 0 END), 0.0) as refund_gross
+                FROM `commerce_orders`
+                WHERE shop_id = ? AND platform_created_at >= ? AND platform_created_at <= ?");
+            $stmtLoss->execute([$shopId, $startDate . ' 00:00:00', $endDate . ' 23:59:59']);
+            $lRow = $stmtLoss->fetch(PDO::FETCH_ASSOC) ?: [];
+            $sGross = (float)($lRow['shop_gross'] ?? 0.0);
+            $sCanc = (float)($lRow['cancel_gross'] ?? 0.0);
+            $sRef = (float)($lRow['refund_gross'] ?? 0.0);
+            if ($sGross > 0) {
+                $shopCancelRate = min(1.0, max(0.0, $sCanc / $sGross));
+                $shopRefundRate = min(1.0, max(0.0, $sRef / $sGross));
+                $shopLossRate = min(1.0, max(0.0, ($sCanc + $sRef) / $sGross));
+            }
+        } catch (\Throwable $t) {}
+
+        try {
+            $stmtCat = $this->db->prepare("SELECT product_id, MAX(product_name) as product_name, MAX(COALESCE(display_image_url, product_image, sku_image)) as img_url
+                FROM `commerce_product_catalog` WHERE shop_id = ? GROUP BY product_id");
+            $stmtCat->execute([$shopId]);
+            while ($cr = $stmtCat->fetch(PDO::FETCH_ASSOC)) {
+                $pid = (string)$cr['product_id'];
+                $productMetaMap[$pid] = [
+                    'product_id' => $pid,
+                    'product_name' => (string)($cr['product_name'] ?: ('Sản phẩm ' . $pid)),
+                    'product_image' => !empty($cr['img_url']) ? (string)$cr['img_url'] : null,
+                    'loss_rate' => $shopLossRate
+                ];
+            }
+        } catch (\Throwable $t) {}
+
+        try {
+            $stmtOrdProd = $this->db->prepare("SELECT
+                oi.product_id,
+                MAX(oi.product_name) as product_name,
+                MAX(oi.sku_image) as sku_image,
+                SUM(oi.sale_price * oi.quantity) as gross_val,
+                SUM(CASE WHEN o.order_status IN ('CANCELLED','RETURNED','REFUNDED') THEN (oi.sale_price * oi.quantity) ELSE 0 END) as loss_val
+                FROM `commerce_order_items` oi
+                INNER JOIN `commerce_orders` o ON oi.order_id = o.id
+                WHERE o.shop_id = ? AND o.platform_created_at >= ? AND o.platform_created_at <= ?
+                GROUP BY oi.product_id");
+            $stmtOrdProd->execute([$shopId, $startDate . ' 00:00:00', $endDate . ' 23:59:59']);
+            while ($or = $stmtOrdProd->fetch(PDO::FETCH_ASSOC)) {
+                $pid = (string)$or['product_id'];
+                $gVal = (float)($or['gross_val'] ?? 0);
+                $lVal = (float)($or['loss_val'] ?? 0);
+                $pLossRate = $gVal > 0 ? min(1.0, max(0.0, $lVal / $gVal)) : $shopLossRate;
+                if (!isset($productMetaMap[$pid])) {
+                    $productMetaMap[$pid] = [
+                        'product_id' => $pid,
+                        'product_name' => (string)($or['product_name'] ?: ('Sản phẩm ' . $pid)),
+                        'product_image' => !empty($or['sku_image']) ? (string)$or['sku_image'] : null,
+                        'loss_rate' => $pLossRate
+                    ];
+                } else {
+                    if (!empty($or['product_name'])) $productMetaMap[$pid]['product_name'] = (string)$or['product_name'];
+                    if (empty($productMetaMap[$pid]['product_image']) && !empty($or['sku_image'])) {
+                        $productMetaMap[$pid]['product_image'] = (string)$or['sku_image'];
+                    }
+                    $productMetaMap[$pid]['loss_rate'] = $pLossRate;
+                }
+            }
+        } catch (\Throwable $t) {}
+
+        if ($this->hasProductTable()) {
+            try {
+                $stmtCampProd = $this->db->prepare("SELECT
+                    p.campaign_id,
+                    p.item_group_id,
+                    SUM(p.cost) as spend,
+                    SUM(p.ads_gross_revenue) as gross_revenue,
+                    SUM(p.orders) as orders
+                    FROM `commerce_ads_product_daily` p
+                    WHERE (p.shop_id = ? OR p.shop_id = '' OR p.shop_id IS NULL)
+                      AND p.stat_date >= ? AND p.stat_date <= ?
+                    GROUP BY p.campaign_id, p.item_group_id
+                    ORDER BY spend DESC, gross_revenue DESC");
+                $stmtCampProd->execute([$shopId, $startDate, $endDate]);
+                while ($cp = $stmtCampProd->fetch(PDO::FETCH_ASSOC)) {
+                    $cid = (string)$cp['campaign_id'];
+                    $spuId = (string)$cp['item_group_id'];
+                    $pSpend = (float)($cp['spend'] ?? 0);
+                    $pGross = (float)($cp['gross_revenue'] ?? 0);
+                    $pOrders = (int)($cp['orders'] ?? 0);
+                    $pMeta = $productMetaMap[$spuId] ?? null;
+                    $pLossRate = $pMeta ? (float)$pMeta['loss_rate'] : $shopLossRate;
+                    $pLossAmt = round($pGross * $pLossRate, 0);
+                    $pRealized = max(0.0, round($pGross - $pLossAmt, 0));
+
+                    $campaignProductsMap[$cid][] = [
+                        'item_group_id' => $spuId,
+                        'product_id' => $spuId,
+                        'product_name' => $pMeta ? $pMeta['product_name'] : ('Sản phẩm ' . $spuId),
+                        'product_image' => $pMeta ? $pMeta['product_image'] : null,
+                        'spend' => round($pSpend, 0),
+                        'gross_revenue' => round($pGross, 0),
+                        'cancel_refund_loss' => $pLossAmt,
+                        'realized_revenue' => $pRealized,
+                        'orders' => $pOrders,
+                        'cancelled_orders_est' => (int)round($pOrders * $pLossRate),
+                        'gross_roi' => $pSpend > 0 ? round($pGross / $pSpend, 2) : null,
+                        'realized_roi' => $pSpend > 0 ? round($pRealized / $pSpend, 2) : null,
+                        'cpa' => $pOrders > 0 ? round($pSpend / $pOrders, 0) : null,
+                    ];
+                }
+            } catch (\Throwable $t) {}
+        }
+
         foreach ($rawCamps as $c) {
             $cId = (string)($c['campaign_id'] ?? '');
             $cSpend = (float)($c['total_spend'] ?? $c['spend'] ?? 0);
@@ -758,6 +877,12 @@ class CommerceAdsService {
             $cRoi = $cSpend > 0 ? round($cGross / $cSpend, 2) : 0.0;
             $cCpa = $cOrders > 0 ? round($cSpend / $cOrders, 0) : 0.0;
             $activeDaysCnt = (int)($c['active_days_count'] ?? ($cSpend > 0 ? 1 : 0));
+
+            $cLossAmt = round($cGross * $shopLossRate, 0);
+            $cRealizedRev = max(0.0, round($cGross - $cLossAmt, 0));
+            $cRealizedRoi = $cSpend > 0 ? round($cRealizedRev / $cSpend, 2) : 0.0;
+            $cCancelledOrders = $cOrders > 0 ? (int)round($cOrders * $shopCancelRate) : 0;
+            $cRefundedOrders = $cOrders > 0 ? (int)round($cOrders * $shopRefundRate) : 0;
 
             // Authoritative Classification from official API semantics:
             $promType = strtoupper(trim((string)($c['promotion_type'] ?? '')));
@@ -775,8 +900,12 @@ class CommerceAdsService {
             $normName = !empty($rawNameStr) ? $rawNameStr : ('Chiến dịch ' . $cId);
 
             $opStatus = (string)($c['operation_status'] ?? 'ENABLE');
-            $isActive = ($opStatus === 'ENABLE' || (int)($c['operation_status'] ?? 0) === 1);
+            $isActiveInPeriod = ($cSpend > 0 || $cGross > 0 || $cOrders > 0);
+            $isActive = ($opStatus === 'ENABLE' || (int)($c['operation_status'] ?? 0) === 1 || $isActiveInPeriod);
             if ($isActive) $activeCampsCount++;
+            $deliveryBadge = $cSpend > 0
+                ? '● Đang chạy (Có chi tiêu)'
+                : ($isActiveInPeriod ? '● Có phân bổ đơn' : ($opStatus === 'ENABLE' ? '○ Đang bật (0đ)' : '○ Đã tắt (0đ)'));
 
             $dailyBudget = isset($c['budget']) && (float)$c['budget'] > 0 ? (float)$c['budget'] : null;
             $apiTargetRoas = (isset($c['target_roas']) && (float)$c['target_roas'] > 0) ? (float)$c['target_roas'] : null;
@@ -892,14 +1021,23 @@ class CommerceAdsService {
                 'campaign_type' => $normType,
                 'promotion_type' => $isLive ? 'LIVE' : 'PRODUCT',
                 'operation_status' => $isActive ? 'ENABLE' : 'DISABLE',
+                'raw_operation_status' => $opStatus,
                 'is_active' => $isActive,
+                'is_active_in_period' => $isActiveInPeriod,
+                'delivery_badge' => $deliveryBadge,
                 'active_days_count' => $activeDaysCnt,
                 'ads_cost' => $cSpend,
                 'spend' => $cSpend,
                 'cost' => $cSpend,
                 'gross_revenue' => $cGross,
+                'cancel_refund_loss' => $cLossAmt,
+                'realized_revenue' => $cRealizedRev,
                 'orders' => $cOrders,
+                'cancelled_orders_est' => $cCancelledOrders,
+                'refunded_orders_est' => $cRefundedOrders,
+                'realized_orders_est' => max(0, $cOrders - $cCancelledOrders - $cRefundedOrders),
                 'roi' => $cRoi,
+                'realized_roi' => $cRealizedRoi,
                 'cost_per_order' => $cCpa,
                 'cpa' => $cCpa,
                 'budget' => $dailyBudget,
@@ -917,6 +1055,7 @@ class CommerceAdsService {
                 'effectiveness_status' => $effectivenessStatus,
                 'effectiveness_label' => $effectivenessLabel,
                 'recommendation' => $recommendation,
+                'products_breakdown' => $campaignProductsMap[$cId] ?? [],
                 'period_comparison' => [
                     'curr_spend' => $currCompSpend,
                     'curr_gross_revenue' => $currCompGross,
@@ -1044,16 +1183,71 @@ class CommerceAdsService {
                     'campaign_id' => $selectedCampaign['campaign_id'],
                     'campaign_name' => $selectedCampaign['campaign_name'],
                     'campaign_type' => $selectedCampaign['campaign_type'],
-                    'operation_status' => $selectedCampaign['operation_status']
+                    'promotion_type' => $selectedCampaign['promotion_type'] ?? null,
+                    'operation_status' => $selectedCampaign['operation_status'],
+                    'delivery_badge' => $selectedCampaign['delivery_badge'] ?? null
                 ];
                 $selectedCampaign['metrics'] = [
                     'ads_cost' => $selectedCampaign['spend'],
                     'gross_revenue' => $selectedCampaign['gross_revenue'],
+                    'cancel_refund_loss' => $selectedCampaign['cancel_refund_loss'] ?? 0,
+                    'realized_revenue' => $selectedCampaign['realized_revenue'] ?? $selectedCampaign['gross_revenue'],
                     'orders' => $selectedCampaign['orders'],
+                    'cancelled_orders_est' => $selectedCampaign['cancelled_orders_est'] ?? 0,
+                    'refunded_orders_est' => $selectedCampaign['refunded_orders_est'] ?? 0,
                     'roi' => $selectedCampaign['roi'],
+                    'realized_roi' => $selectedCampaign['realized_roi'] ?? $selectedCampaign['roi'],
                     'cost_per_order' => $selectedCampaign['cost_per_order'],
                     'cpa' => $selectedCampaign['cpa']
                 ];
+
+                // Fetch real videos in this campaign from commerce_ads_creative_daily
+                $campVideos = [];
+                if ($this->hasCreativeTable()) {
+                    try {
+                        $stmtCV = $this->db->prepare("SELECT
+                            c.item_id,
+                            c.item_group_id,
+                            MAX(c.creative_delivery_status_normalized) as delivery_status,
+                            SUM(c.cost) as spend,
+                            SUM(c.ads_gross_revenue) as gross_revenue,
+                            SUM(c.orders) as orders
+                            FROM `commerce_ads_creative_daily` c
+                            WHERE (c.shop_id = ? OR c.shop_id = '' OR c.shop_id IS NULL)
+                              AND c.campaign_id = ?
+                              AND c.stat_date >= ? AND c.stat_date <= ?
+                            GROUP BY c.item_id, c.item_group_id
+                            ORDER BY spend DESC, gross_revenue DESC");
+                        $stmtCV->execute([$shopId, $campaignId, $startDate, $endDate]);
+                        while ($cv = $stmtCV->fetch(PDO::FETCH_ASSOC)) {
+                            $vSpend = (float)($cv['spend'] ?? 0);
+                            $vGross = (float)($cv['gross_revenue'] ?? 0);
+                            $vOrders = (int)($cv['orders'] ?? 0);
+                            $spuId = (string)($cv['item_group_id'] ?? '');
+                            $pMeta = $productMetaMap[$spuId] ?? null;
+                            $vLossRate = $pMeta ? (float)$pMeta['loss_rate'] : $shopLossRate;
+                            $vLossAmt = round($vGross * $vLossRate, 0);
+                            $vRealized = max(0.0, round($vGross - $vLossAmt, 0));
+
+                            $campVideos[] = [
+                                'item_id' => (string)$cv['item_id'],
+                                'item_group_id' => $spuId,
+                                'product_name' => $pMeta ? $pMeta['product_name'] : ($spuId !== '' ? ('Sản phẩm ' . $spuId) : '—'),
+                                'delivery_status' => (string)($cv['delivery_status'] ?? 'DELIVERING'),
+                                'spend' => round($vSpend, 0),
+                                'gross_revenue' => round($vGross, 0),
+                                'cancel_refund_loss' => $vLossAmt,
+                                'realized_revenue' => $vRealized,
+                                'orders' => $vOrders,
+                                'gross_roi' => $vSpend > 0 ? round($vGross / $vSpend, 2) : null,
+                                'realized_roi' => $vSpend > 0 ? round($vRealized / $vSpend, 2) : null,
+                            ];
+                        }
+                    } catch (\Throwable $t) {}
+                }
+
+                $selectedCampaign['products_breakdown'] = $selectedCampaign['products_breakdown'] ?? [];
+                $selectedCampaign['videos_breakdown'] = $campVideos;
                 $selectedCampaign['guardrail_disclosures'] = [
                     'product_breakdown' => [
                         'status' => 'SUPPORTED_NOT_SYNCED',
@@ -1579,7 +1773,47 @@ class CommerceAdsService {
             $expectedDays = 1;
         }
 
-        // 1. Query Product Ads Daily Facts
+        // 1. Query Pre-aggregated Store Orders & Catalog per Product first
+        $orderItemMap = [];
+        $catalogMap = [];
+        try {
+            $stmtCat = $this->db->prepare("SELECT product_id, MAX(product_name) as product_name, MAX(COALESCE(display_image_url, product_image, sku_image)) as img_url
+                FROM `commerce_product_catalog` WHERE shop_id = ? GROUP BY product_id");
+            $stmtCat->execute([$shopId]);
+            while ($cr = $stmtCat->fetch(PDO::FETCH_ASSOC)) {
+                $catalogMap[(string)$cr['product_id']] = $cr;
+            }
+        } catch (\Throwable $t) {}
+
+        try {
+            $startTs = $startDate . ' 00:00:00';
+            $endTs = $endDate . ' 23:59:59';
+            $stmtOrders = $this->db->prepare("SELECT 
+                oi.product_id,
+                COALESCE(MAX(oi.product_name), CONCAT('Sản phẩm ', oi.product_id)) as product_name,
+                MAX(oi.sku_image) as sku_image,
+                SUM(oi.sale_price * oi.quantity) as order_gross_value,
+                SUM(CASE WHEN o.order_status NOT IN ('CANCELLED','RETURNED','REFUNDED') THEN (oi.sale_price * oi.quantity) ELSE 0 END) as realized_revenue,
+                SUM(CASE WHEN o.order_status IN ('CANCELLED','RETURNED','REFUNDED') THEN (oi.sale_price * oi.quantity) ELSE 0 END) as cancellation_refund_value,
+                COUNT(DISTINCT o.platform_order_id) as total_shop_orders,
+                COUNT(DISTINCT CASE WHEN o.order_status = 'CANCELLED' THEN o.platform_order_id ELSE NULL END) as cancelled_orders,
+                COUNT(DISTINCT CASE WHEN o.order_status IN ('RETURNED','REFUNDED') THEN o.platform_order_id ELSE NULL END) as refunded_orders,
+                SUM(oi.quantity) as units_sold
+                FROM `commerce_order_items` oi
+                JOIN `commerce_orders` o ON oi.order_id = o.id
+                WHERE o.shop_id = ? AND o.platform_created_at >= ? AND o.platform_created_at <= ?
+                GROUP BY oi.product_id
+                ORDER BY realized_revenue DESC");
+            $stmtOrders->execute([$shopId, $startTs, $endTs]);
+            $rows = $stmtOrders->fetchAll(PDO::FETCH_ASSOC);
+            foreach ($rows as $r) {
+                $orderItemMap[(string)$r['product_id']] = $r;
+            }
+        } catch (\Throwable $t) {
+            $orderItemMap = [];
+        }
+
+        // 2. Query Product Ads Daily Facts
         $productStats = [];
         $distinctDays = 0;
         $totalSpend = 0.0;
@@ -1590,6 +1824,7 @@ class CommerceAdsService {
             $stmt = $this->db->prepare("SELECT 
                 p.item_group_id,
                 COUNT(DISTINCT p.campaign_id) as campaigns_count,
+                GROUP_CONCAT(DISTINCT p.campaign_id) as campaign_ids_csv,
                 COUNT(DISTINCT p.stat_date) as distinct_days,
                 MAX(p.stat_date) as latest_stat_date,
                 SUM(p.cost) as total_spend,
@@ -1599,17 +1834,66 @@ class CommerceAdsService {
                 AVG(p.api_roi) as avg_api_roi,
                 MAX(p.source_type) as source_type
                 FROM `commerce_ads_product_daily` p
-                WHERE p.shop_id = ? AND p.stat_date >= ? AND p.stat_date <= ?
+                WHERE (p.shop_id = ? OR p.shop_id = '' OR p.shop_id IS NULL) AND p.stat_date >= ? AND p.stat_date <= ?
                 GROUP BY p.item_group_id
                 ORDER BY total_spend DESC");
             $stmt->execute([$shopId, $startDate, $endDate]);
             $productStats = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-            $stmtDays = $this->db->prepare("SELECT COUNT(DISTINCT stat_date) FROM `commerce_ads_product_daily` WHERE shop_id = ? AND stat_date >= ? AND stat_date <= ?");
+            $stmtDays = $this->db->prepare("SELECT COUNT(DISTINCT stat_date) FROM `commerce_ads_product_daily` WHERE (shop_id = ? OR shop_id = '' OR shop_id IS NULL) AND stat_date >= ? AND stat_date <= ?");
             $stmtDays->execute([$shopId, $startDate, $endDate]);
             $distinctDays = (int)$stmtDays->fetchColumn();
         } catch (\Throwable $t) {
             $productStats = [];
+        }
+
+        // Fallback: If commerce_ads_product_daily is empty, synthesize from store orders + Product GMV Max campaign spend
+        if (empty($productStats) && !empty($orderItemMap)) {
+            $campProdSpend = 0.0;
+            $campProdGross = 0.0;
+            $campProdCamps = 0;
+            try {
+                $stmtCP = $this->db->prepare("SELECT
+                    COALESCE(SUM(spend), 0) as spend,
+                    COALESCE(SUM(gross_revenue), 0) as gross,
+                    COUNT(DISTINCT campaign_id) as camps,
+                    COUNT(DISTINCT stat_date) as d_days
+                    FROM `commerce_ads_campaign_daily`
+                    WHERE (shop_id = ? OR shop_id = '' OR shop_id IS NULL)
+                      AND stat_date >= ? AND stat_date <= ?
+                      AND (promotion_type = 'PRODUCT' OR (promotion_type IS NULL AND campaign_type NOT LIKE '%LIVE%' AND campaign_name NOT LIKE '%LIVE%'))");
+                $stmtCP->execute([$shopId, $startDate, $endDate]);
+                $cpRow = $stmtCP->fetch(PDO::FETCH_ASSOC) ?: [];
+                $campProdSpend = (float)($cpRow['spend'] ?? 0);
+                $campProdGross = (float)($cpRow['gross'] ?? 0);
+                $campProdCamps = (int)($cpRow['camps'] ?? 1);
+                $distinctDays = (int)($cpRow['d_days'] ?? 1);
+            } catch (\Throwable $t) {}
+
+            $totalStoreGross = 0.0;
+            foreach ($orderItemMap as $oItem) {
+                $totalStoreGross += (float)($oItem['order_gross_value'] ?? 0);
+            }
+
+            foreach ($orderItemMap as $pid => $oItem) {
+                $sGross = (float)($oItem['order_gross_value'] ?? 0);
+                $share = $totalStoreGross > 0 ? ($sGross / $totalStoreGross) : 0.0;
+                $allocSpend = round($campProdSpend * $share, 0);
+                $allocAdsGross = $campProdGross > 0 ? round($campProdGross * $share, 0) : $sGross;
+                $productStats[] = [
+                    'item_group_id' => $pid,
+                    'campaigns_count' => $campProdCamps,
+                    'campaign_ids_csv' => 'PRODUCT_GMV_MAX',
+                    'distinct_days' => $distinctDays,
+                    'latest_stat_date' => $endDate,
+                    'total_spend' => $allocSpend,
+                    'total_net_cost' => $allocSpend,
+                    'total_ads_gross_revenue' => $allocAdsGross,
+                    'total_ads_orders' => (int)($oItem['total_shop_orders'] ?? 0),
+                    'avg_api_roi' => $allocSpend > 0 ? round($allocAdsGross / $allocSpend, 2) : null,
+                    'source_type' => 'STORE_ORDER_SYNTHESIS'
+                ];
+            }
         }
 
         if (empty($productStats)) {
@@ -1629,32 +1913,6 @@ class CommerceAdsService {
                 'macro_overview' => null,
                 'products' => []
             ];
-        }
-
-        // 2. Query Pre-aggregated Store Orders per Product
-        $orderItemMap = [];
-        try {
-            $startTs = $startDate . ' 00:00:00';
-            $endTs = $endDate . ' 23:59:59';
-            $stmtOrders = $this->db->prepare("SELECT 
-                oi.product_id,
-                COALESCE(MAX(oi.product_name), CONCAT('Sản phẩm ', oi.product_id)) as product_name,
-                SUM(oi.sale_price * oi.quantity) as order_gross_value,
-                SUM(CASE WHEN o.order_status NOT IN ('CANCELLED') THEN (oi.sale_price * oi.quantity) ELSE 0 END) as realized_revenue,
-                SUM(CASE WHEN o.order_status IN ('CANCELLED') THEN (oi.sale_price * oi.quantity) ELSE 0 END) as cancellation_refund_value,
-                COUNT(DISTINCT o.platform_order_id) as total_shop_orders,
-                SUM(oi.quantity) as units_sold
-                FROM `commerce_order_items` oi
-                JOIN `commerce_orders` o ON oi.order_id = o.id
-                WHERE o.shop_id = ? AND o.platform_created_at >= ? AND o.platform_created_at <= ?
-                GROUP BY oi.product_id");
-            $stmtOrders->execute([$shopId, $startTs, $endTs]);
-            $rows = $stmtOrders->fetchAll(PDO::FETCH_ASSOC);
-            foreach ($rows as $r) {
-                $orderItemMap[(string)$r['product_id']] = $r;
-            }
-        } catch (\Throwable $t) {
-            $orderItemMap = [];
         }
 
         // 3. Combine Product Facts with Store Performance & Cost Configuration (P0-04)
@@ -1681,28 +1939,41 @@ class CommerceAdsService {
             $totalOrders += $orders;
 
             $hasStoreMatch = isset($orderItemMap[$spuId]);
+            $catInfo = $catalogMap[$spuId] ?? null;
             if ($hasStoreMatch) {
                 $mappedCount++;
                 $store = $orderItemMap[$spuId];
-                $prodName = (string)$store['product_name'];
+                $prodName = !empty($store['product_name']) ? (string)$store['product_name'] : ($catInfo['product_name'] ?? ('Sản phẩm ' . $spuId));
+                $prodImage = !empty($store['sku_image']) ? (string)$store['sku_image'] : ($catInfo['img_url'] ?? null);
                 $orderGross = (float)($store['order_gross_value'] ?? 0);
                 $realizedRev = (float)($store['realized_revenue'] ?? 0);
                 $cancelRefund = (float)($store['cancellation_refund_value'] ?? 0);
                 $shopOrders = (int)($store['total_shop_orders'] ?? 0);
+                $cancelledOrders = (int)($store['cancelled_orders'] ?? 0);
+                $refundedOrders = (int)($store['refunded_orders'] ?? 0);
                 $unitsSold = (int)($store['units_sold'] ?? 0);
                 $mappingStatus = 'RUNTIME_VERIFIED_MAPPING';
-                $mappingBadge = 'RUNTIME_VERIFIED_MAPPING';
+                $mappingBadge = 'Đã khớp đơn hàng';
             } else {
                 $unmappedCount++;
-                $prodName = 'Sản phẩm ' . $spuId;
+                $prodName = $catInfo && !empty($catInfo['product_name']) ? (string)$catInfo['product_name'] : ('Sản phẩm ' . $spuId);
+                $prodImage = $catInfo['img_url'] ?? null;
                 $orderGross = null;
                 $realizedRev = null;
                 $cancelRefund = null;
                 $shopOrders = null;
+                $cancelledOrders = 0;
+                $refundedOrders = 0;
                 $unitsSold = null;
                 $mappingStatus = 'UNMAPPED';
-                $mappingBadge = 'UNMAPPED';
+                $mappingBadge = 'Chưa khớp đơn';
             }
+
+            $prodLossRate = ($orderGross !== null && $orderGross > 0 && $cancelRefund !== null)
+                ? min(1.0, max(0.0, $cancelRefund / $orderGross))
+                : 0.0;
+            $realizedAdsRevenue = max(0.0, round($gross * (1.0 - $prodLossRate), 0));
+            $realizedRoi = $spend > 0 ? round($realizedAdsRevenue / $spend, 2) : 0.0;
 
             // P0-04 Break-even ROI enrichment per SPU
             $costConfig = $productCosts[$spuId] ?? null;
@@ -1733,22 +2004,32 @@ class CommerceAdsService {
                 'item_group_id' => $spuId,
                 'product_id' => $spuId,
                 'product_name' => $prodName,
+                'product_image' => $prodImage,
+                'campaign_id' => $p['campaign_ids_csv'] ?? 'PRODUCT_GMV_MAX',
                 'mapping_status' => $mappingStatus,
                 'mapping_badge' => $mappingBadge,
                 'is_runtime_verified' => $hasStoreMatch,
                 'spend' => $spend,
+                'ads_cost' => $spend,
                 'net_cost' => $netCost,
                 'ads_gross_revenue' => $gross,
+                'realized_ads_revenue' => $realizedAdsRevenue,
                 'ads_orders' => $orders,
                 'api_roi' => $apiRoi,
                 'derived_roi' => $derivedRoi,
+                'roi' => $derivedRoi,
+                'realized_roi' => $realizedRoi,
                 'cpa' => $derivedCpa,
                 'campaigns_count' => (int)($p['campaigns_count'] ?? 1),
                 'distinct_days' => (int)($p['distinct_days'] ?? 1),
                 'order_gross_value' => $orderGross,
+                'store_gross_sales' => $orderGross,
                 'realized_revenue' => $realizedRev,
                 'cancellation_refund_value' => $cancelRefund,
                 'total_shop_orders' => $shopOrders,
+                'store_order_count' => $shopOrders,
+                'cancelled_orders' => $cancelledOrders,
+                'refunded_orders' => $refundedOrders,
                 'units_sold' => $unitsSold,
                 'selling_price' => $sellingPrice,
                 'cogs_amount' => $cogsAmount,

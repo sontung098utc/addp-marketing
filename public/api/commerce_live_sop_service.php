@@ -164,6 +164,17 @@ class CommerceLiveSopService {
         $roomAdsMap = $this->fetchRoomLevelAds($shopId, $startDate, $endDate);
         $dailyCampaignAds = $this->fetchDailyCampaignLiveAds($shopId, $startDate, $endDate);
 
+        // 2b. Compute shop cancellation & refund rate in period for realized LIVE revenue
+        $shopLossStats = $this->fetchShopLossRate($shopId, $startDate, $endDate);
+        $shopLossRate = $shopLossStats['loss_rate'];
+        $shopCancelRate = $shopLossStats['cancel_rate'];
+        $shopRefundRate = $shopLossStats['refund_rate'];
+
+        // 2c. If commerce_live_sessions is empty in period, synthesize sessions from active LIVE Ads runs
+        if (empty($sessions)) {
+            $sessions = $this->fetchSyntheticLiveSessionsFromAds($shopId, $startDate, $endDate);
+        }
+
         // 3. Group sessions into Ca 1 (Session 1: <14:00) and Ca 2 (Session 2: >=14:00)
         //    and attach Ads Spend + 60% Pacing Alert + Duration Alert
         $enrichedSessions = [];
@@ -186,17 +197,17 @@ class CommerceLiveSopService {
             $slotKey = $hour < 14 ? 'session_1' : 'session_2';
 
             // Determine Ads spend & attributed revenue for this session
-            $spend = null;
-            $attributedGmv = null;
-            $attributedOrders = null;
-            $spendAttributionMode = 'UNAVAILABLE';
+            $spend = isset($s['direct_spend']) ? (float)$s['direct_spend'] : null;
+            $attributedGmv = isset($s['direct_attributed_gmv']) ? (float)$s['direct_attributed_gmv'] : null;
+            $attributedOrders = isset($s['direct_attributed_orders']) ? (int)$s['direct_attributed_orders'] : null;
+            $spendAttributionMode = isset($s['direct_spend']) ? 'CAMPAIGN_DAILY_RUN' : 'UNAVAILABLE';
 
-            if (isset($roomAdsMap[$sid])) {
+            if ($spend === null && isset($roomAdsMap[$sid])) {
                 $spend = (float)$roomAdsMap[$sid]['spend'];
                 $attributedGmv = (float)$roomAdsMap[$sid]['ads_gross_revenue'];
                 $attributedOrders = (int)$roomAdsMap[$sid]['orders'];
                 $spendAttributionMode = 'EXACT_ROOM_ID';
-            } elseif (isset($dailyCampaignAds[$sDate]) && $dailyCampaignAds[$sDate]['spend'] > 0) {
+            } elseif ($spend === null && isset($dailyCampaignAds[$sDate]) && $dailyCampaignAds[$sDate]['spend'] > 0) {
                 $daySessCount = max(1, $sessionsCountByDate[$sDate] ?? 1);
                 $spend = round($dailyCampaignAds[$sDate]['spend'] / $daySessCount, 0);
                 $attributedGmv = round($dailyCampaignAds[$sDate]['gross_revenue'] / $daySessCount, 0);
@@ -204,7 +215,12 @@ class CommerceLiveSopService {
                 $spendAttributionMode = 'DAY_EQUAL_SPLIT';
             }
 
-            $durationSec = isset($s['duration_seconds']) ? (int)$s['duration_seconds'] : null;
+            $rawGmv = isset($s['gmv']) ? (float)$s['gmv'] : null;
+            $CancelLoss = $rawGmv !== null ? round($rawGmv * $shopLossRate, 0) : null;
+            $realizedGmv = $rawGmv !== null ? max(0.0, round($rawGmv - (float)$CancelLoss, 0)) : null;
+            $realizedAttrGmv = $attributedGmv !== null ? max(0.0, round($attributedGmv * (1.0 - $shopLossRate), 0)) : null;
+
+            $durationSec = isset($s['duration_seconds']) && $s['duration_seconds'] !== null ? (int)$s['duration_seconds'] : null;
             $durationHours = $durationSec !== null ? round($durationSec / 3600, 2) : null;
 
             $pacingAlert = $this->evaluateBudgetPacing($spend, $config['session_budget_cap']);
@@ -212,18 +228,19 @@ class CommerceLiveSopService {
 
             $funnel = $this->buildFunnelDiagnosis([
                 'impressions' => isset($s['impressions']) && (int)$s['impressions'] > 0 ? (int)$s['impressions'] : null,
-                'total_views' => isset($s['total_views']) ? (int)$s['total_views'] : null,
-                'clicks' => isset($s['clicks']) ? (int)$s['clicks'] : null,
+                'total_views' => isset($s['total_views']) && $s['total_views'] !== null ? (int)$s['total_views'] : null,
+                'clicks' => isset($s['clicks']) && $s['clicks'] !== null ? (int)$s['clicks'] : null,
                 'orders_count' => isset($s['orders_count']) ? (int)$s['orders_count'] : null,
-                'gmv' => isset($s['gmv']) ? (float)$s['gmv'] : null,
+                'gmv' => $realizedGmv ?? $rawGmv,
                 'spend' => $spend,
-                'attributed_gmv' => $attributedGmv,
+                'attributed_gmv' => $realizedAttrGmv ?? $attributedGmv,
             ], $config, 1);
 
             $isActiveSession = (($spend !== null && $spend > 0) || ((float)($s['gmv'] ?? 0) > 0) || ((int)($s['orders_count'] ?? 0) > 0));
 
             $item = [
                 'session_id' => $sid,
+                'campaign_id' => $s['campaign_id'] ?? null,
                 'title' => (string)($s['title'] ?: ('Phiên LIVE ' . $sid)),
                 'creator_username' => (string)($s['creator_username'] ?? ''),
                 'start_time' => $s['start_time'],
@@ -234,13 +251,16 @@ class CommerceLiveSopService {
                 'is_active' => $isActiveSession,
                 'duration_seconds' => $durationSec,
                 'duration_hours' => $durationHours,
-                'impressions' => isset($s['impressions']) ? (int)$s['impressions'] : null,
-                'total_views' => isset($s['total_views']) ? (int)$s['total_views'] : null,
-                'clicks' => isset($s['clicks']) ? (int)$s['clicks'] : null,
+                'impressions' => isset($s['impressions']) && $s['impressions'] !== null ? (int)$s['impressions'] : null,
+                'total_views' => isset($s['total_views']) && $s['total_views'] !== null ? (int)$s['total_views'] : null,
+                'clicks' => isset($s['clicks']) && $s['clicks'] !== null ? (int)$s['clicks'] : null,
                 'orders_count' => isset($s['orders_count']) ? (int)$s['orders_count'] : null,
-                'gmv' => isset($s['gmv']) ? (float)$s['gmv'] : null,
+                'gmv' => $rawGmv,
+                'cancel_refund_loss' => $CancelLoss,
+                'realized_gmv' => $realizedGmv,
                 'spend' => $spend,
                 'attributed_gmv' => $attributedGmv,
+                'realized_attributed_gmv' => $realizedAttrGmv,
                 'attributed_orders' => $attributedOrders,
                 'spend_attribution_mode' => $spendAttributionMode,
                 'pacing_alert' => $pacingAlert,
@@ -336,6 +356,10 @@ class CommerceLiveSopService {
             $config['live_daily_budget']
         );
 
+        // 5. Detailed LIVE GMV Max Campaigns & Products sold in period
+        $liveCampaigns = $this->fetchDetailedLiveCampaigns($shopId, $startDate, $endDate, $config, $shopLossStats);
+        $liveProducts = $this->fetchDetailedLiveProducts($shopId, $startDate, $endDate);
+
         return [
             'status' => $totalSessions > 0 || $hasPeriodSpend ? 'OK' : 'NO_DATA',
             'period' => [
@@ -345,6 +369,9 @@ class CommerceLiveSopService {
                 'active_sessions_count' => $totalSessions,
                 'inactive_sessions_count' => $inactiveSessionsCount,
                 'total_duration_hours' => round($totalDurationHours, 2),
+                'shop_cancel_rate_pct' => round($shopCancelRate * 100, 1),
+                'shop_refund_rate_pct' => round($shopRefundRate * 100, 1),
+                'shop_loss_rate_pct' => round($shopLossRate * 100, 1),
             ],
             'config' => $config,
             'alerts' => [
@@ -355,6 +382,8 @@ class CommerceLiveSopService {
             'slots' => $sessionSlotBuckets,
             'overall_funnel' => $overallFunnel,
             'sessions' => $enrichedSessions,
+            'live_campaigns' => $liveCampaigns,
+            'live_products' => $liveProducts,
         ];
     }
 
@@ -780,7 +809,7 @@ class CommerceLiveSopService {
                 SUM(ads_gross_revenue) as ads_gross_revenue,
                 SUM(orders) as orders
                 FROM `commerce_ads_live_daily`
-                WHERE shop_id = ? AND stat_date >= ? AND stat_date <= ?
+                WHERE (shop_id = ? OR shop_id = '' OR shop_id IS NULL) AND stat_date >= ? AND stat_date <= ?
                 GROUP BY room_id");
             $stmt->execute([$shopId, $startDate, $endDate]);
             while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
@@ -804,7 +833,7 @@ class CommerceLiveSopService {
                 COALESCE(SUM(gross_revenue), 0) as gross_revenue,
                 COALESCE(SUM(orders), 0) as orders
                 FROM `commerce_ads_campaign_daily`
-                WHERE shop_id = ? AND stat_date >= ? AND stat_date <= ?
+                WHERE (shop_id = ? OR shop_id = '' OR shop_id IS NULL) AND stat_date >= ? AND stat_date <= ?
                   AND (promotion_type = 'LIVE' OR campaign_type LIKE '%LIVE%' OR campaign_name LIKE '%LIVE%')
                 GROUP BY stat_date");
             $stmt->execute([$shopId, $startDate, $endDate]);
@@ -819,6 +848,316 @@ class CommerceLiveSopService {
             return [];
         }
         return $map;
+    }
+
+    private function fetchShopLossRate(string $shopId, string $startDate, string $endDate): array {
+        $res = ['loss_rate' => 0.0, 'cancel_rate' => 0.0, 'refund_rate' => 0.0];
+        try {
+            $stmt = $this->db->prepare("SELECT
+                COALESCE(SUM(order_gross_amount), 0.0) as shop_gross,
+                COALESCE(SUM(CASE WHEN order_status = 'CANCELLED' THEN order_gross_amount ELSE 0 END), 0.0) as cancel_gross,
+                COALESCE(SUM(CASE WHEN order_status IN ('RETURNED','REFUNDED') THEN order_gross_amount ELSE 0 END), 0.0) as refund_gross
+                FROM `commerce_orders`
+                WHERE shop_id = ? AND platform_created_at >= ? AND platform_created_at <= ?");
+            $stmt->execute([$shopId, $startDate . ' 00:00:00', $endDate . ' 23:59:59']);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+            $gross = (float)($row['shop_gross'] ?? 0.0);
+            $canc = (float)($row['cancel_gross'] ?? 0.0);
+            $ref = (float)($row['refund_gross'] ?? 0.0);
+
+            // Also check commerce_loss_ledger if refund_gross is 0
+            if ($ref <= 0) {
+                try {
+                    $chkL = $this->db->query("SHOW TABLES LIKE 'commerce_loss_ledger'")->fetch();
+                    if ($chkL) {
+                        $stmtL = $this->db->prepare("SELECT
+                            COALESCE(SUM(CASE WHEN loss_type = 'CANCELLATION' THEN loss_amount ELSE 0 END), 0.0) as l_canc,
+                            COALESCE(SUM(CASE WHEN loss_type = 'REFUND' THEN loss_amount ELSE 0 END), 0.0) as l_ref
+                            FROM `commerce_loss_ledger`
+                            WHERE shop_id = ? AND event_at >= ? AND event_at <= ?");
+                        $stmtL->execute([$shopId, $startDate . ' 00:00:00', $endDate . ' 23:59:59']);
+                        $lRow = $stmtL->fetch(PDO::FETCH_ASSOC) ?: [];
+                        if ((float)($lRow['l_canc'] ?? 0) > $canc) $canc = (float)$lRow['l_canc'];
+                        if ((float)($lRow['l_ref'] ?? 0) > $ref) $ref = (float)$lRow['l_ref'];
+                    }
+                } catch (\Throwable $t) {}
+            }
+
+            if ($gross > 0) {
+                $res['cancel_rate'] = min(1.0, max(0.0, $canc / $gross));
+                $res['refund_rate'] = min(1.0, max(0.0, $ref / $gross));
+                $res['loss_rate'] = min(1.0, max(0.0, ($canc + $ref) / $gross));
+            }
+        } catch (\Throwable $t) {}
+        return $res;
+    }
+
+    /**
+     * When commerce_live_sessions has 0 rows in the period, synthesize session entries
+     * from daily LIVE GMV Max campaign/room runs so Ca 1 / Ca 2 and 8-Metric Diagnosis
+     * display real LIVE Ads performance.
+     */
+    private function fetchSyntheticLiveSessionsFromAds(string $shopId, string $startDate, string $endDate): array {
+        $synthetic = [];
+        try {
+            $stmt = $this->db->prepare("SELECT
+                d.stat_date,
+                d.campaign_id,
+                MAX(d.campaign_name) as campaign_name,
+                SUM(d.spend) as spend,
+                SUM(d.gross_revenue) as gross_revenue,
+                SUM(d.orders) as orders,
+                SUM(d.impressions) as impressions,
+                SUM(d.clicks) as clicks
+                FROM `commerce_ads_campaign_daily` d
+                WHERE (d.shop_id = ? OR d.shop_id = '' OR d.shop_id IS NULL)
+                  AND d.stat_date >= ? AND d.stat_date <= ?
+                  AND (d.promotion_type = 'LIVE' OR d.campaign_type LIKE '%LIVE%' OR d.campaign_name LIKE '%LIVE%')
+                  AND (d.spend > 0 OR d.gross_revenue > 0 OR d.orders > 0)
+                GROUP BY d.stat_date, d.campaign_id
+                ORDER BY d.stat_date DESC, spend DESC");
+            $stmt->execute([$shopId, $startDate, $endDate]);
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+            $idxByDate = [];
+            foreach ($rows as $r) {
+                $d = (string)$r['stat_date'];
+                $cid = (string)$r['campaign_id'];
+                $cName = (string)($r['campaign_name'] ?: ('Chiến dịch LIVE ' . $cid));
+                $idxByDate[$d] = ($idxByDate[$d] ?? 0) + 1;
+
+                // Try extracting hour from campaign name if present, else alternate Ca 1 (10:00) and Ca 2 (19:30)
+                $startTime = $d . ($idxByDate[$d] % 2 === 1 ? ' 10:00:00' : ' 19:30:00');
+                if (preg_match('/(\d{4})[-_\/](\d{2})[-_\/](\d{2})\s+(\d{2}):(\d{2})/', $cName, $m)) {
+                    $startTime = $d . ' ' . $m[4] . ':' . $m[5] . ':00';
+                }
+
+                $spend = (float)($r['spend'] ?? 0);
+                $gmv = (float)($r['gross_revenue'] ?? 0);
+                $orders = (int)($r['orders'] ?? 0);
+                $imps = (int)($r['impressions'] ?? 0);
+                $clicks = (int)($r['clicks'] ?? 0);
+
+                $synthetic[] = [
+                    'session_id' => 'LIVE-' . $d . '-' . $cid,
+                    'campaign_id' => $cid,
+                    'title' => $cName . ' (' . $d . ')',
+                    'creator_username' => 'TikTok LIVE GMV Max',
+                    'start_time' => $startTime,
+                    'end_time' => null,
+                    'duration_seconds' => null,
+                    'gmv' => $gmv,
+                    'orders_count' => $orders,
+                    'units_sold' => $orders,
+                    'customer_count' => $orders,
+                    'total_views' => $clicks > 0 ? $clicks : null,
+                    'impressions' => $imps > 0 ? $imps : null,
+                    'clicks' => $clicks > 0 ? $clicks : null,
+                    'comments_count' => 0,
+                    'shares_count' => 0,
+                    'follows_count' => 0,
+                    'peak_concurrent_users' => 0,
+                    'direct_spend' => $spend,
+                    'direct_attributed_gmv' => $gmv,
+                    'direct_attributed_orders' => $orders,
+                ];
+            }
+        } catch (\Throwable $t) {}
+        return $synthetic;
+    }
+
+    /**
+     * Returns detailed LIVE GMV Max campaigns in the selected period.
+     */
+    private function fetchDetailedLiveCampaigns(
+        string $shopId,
+        string $startDate,
+        string $endDate,
+        array $config,
+        array $shopLossStats
+    ): array {
+        $campaigns = [];
+        $lossRate = $shopLossStats['loss_rate'] ?? 0.0;
+        $cancelRate = $shopLossStats['cancel_rate'] ?? 0.0;
+        $refundRate = $shopLossStats['refund_rate'] ?? 0.0;
+        $targetRoi = (float)($config['target_roi'] ?? 13.0);
+
+        try {
+            $stmt = $this->db->prepare("SELECT
+                d.campaign_id,
+                MAX(d.campaign_name) as campaign_name,
+                MAX(d.operation_status) as operation_status,
+                MAX(d.budget) as budget,
+                MAX(d.target_roas) as target_roas,
+                MIN(CASE WHEN d.spend > 0 OR d.orders > 0 THEN d.stat_date ELSE NULL END) as first_active_date,
+                MAX(CASE WHEN d.spend > 0 OR d.orders > 0 THEN d.stat_date ELSE d.stat_date END) as latest_stat_date,
+                COUNT(DISTINCT CASE WHEN d.spend > 0 OR d.orders > 0 THEN d.stat_date ELSE NULL END) as active_days_count,
+                SUM(d.spend) as total_spend,
+                SUM(d.gross_revenue) as total_gross_revenue,
+                SUM(d.orders) as total_orders
+                FROM `commerce_ads_campaign_daily` d
+                WHERE (d.shop_id = ? OR d.shop_id = '' OR d.shop_id IS NULL)
+                  AND d.stat_date >= ? AND d.stat_date <= ?
+                  AND (d.promotion_type = 'LIVE' OR d.campaign_type LIKE '%LIVE%' OR d.campaign_name LIKE '%LIVE%')
+                GROUP BY d.campaign_id
+                ORDER BY total_spend DESC, total_gross_revenue DESC");
+            $stmt->execute([$shopId, $startDate, $endDate]);
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+            foreach ($rows as $r) {
+                $cid = (string)$r['campaign_id'];
+                $spend = (float)($r['total_spend'] ?? 0);
+                $gross = (float)($r['total_gross_revenue'] ?? 0);
+                $orders = (int)($r['total_orders'] ?? 0);
+                $isActive = ($spend > 0 || $gross > 0 || $orders > 0);
+
+                $cancelOrders = $orders > 0 ? (int)round($orders * $cancelRate) : 0;
+                $refundOrders = $orders > 0 ? (int)round($orders * $refundRate) : 0;
+                $realizedOrders = max(0, $orders - $cancelOrders - $refundOrders);
+
+                $cancelRefundAmount = round($gross * $lossRate, 0);
+                $realizedRevenue = max(0.0, round($gross - $cancelRefundAmount, 0));
+
+                $grossRoi = $spend > 0 ? round($gross / $spend, 2) : null;
+                $realizedRoi = $spend > 0 ? round($realizedRevenue / $spend, 2) : null;
+                $cpa = $orders > 0 ? round($spend / $orders, 0) : null;
+
+                $effTargetRoi = (!empty($r['target_roas']) && (float)$r['target_roas'] > 0)
+                    ? (float)$r['target_roas']
+                    : $targetRoi;
+
+                $statusCode = 'NO_DELIVERY';
+                $statusLabel = 'Ngừng chạy (0đ)';
+                $recommendation = 'Chiến dịch không phát sinh chi tiêu trong kỳ.';
+
+                if ($spend > 0) {
+                    $evalRoi = $realizedRoi ?? $grossRoi ?? 0.0;
+                    if ($evalRoi >= $effTargetRoi) {
+                        $statusCode = 'EFFECTIVE';
+                        $statusLabel = 'Đạt mục tiêu (' . $evalRoi . ' lần)';
+                        $recommendation = 'Nên giữ & tăng 15–20% ngân sách vào khung giờ vàng; duy trì kịch bản ghim sản phẩm mồi.';
+                    } elseif ($orders > 0) {
+                        $statusCode = 'BELOW_TARGET';
+                        $statusLabel = 'Dưới mục tiêu (' . $evalRoi . ' / ' . $effTargetRoi . ' lần)';
+                        $recommendation = 'Thu/chi thực (' . $evalRoi . ' lần) chưa đạt mốc ' . $effTargetRoi . ' lần. Rà soát tỷ lệ bấm giỏ hàng, tung ưu đãi chớp nhoáng và kiểm soát hoàn hủy.';
+                    } else {
+                        $statusCode = 'WASTE';
+                        $statusLabel = 'Tiêu tiền 0 đơn';
+                        $recommendation = 'Chiến dịch tiêu tiền nhưng không ra đơn. Cần tạm dừng hoặc kiểm tra lại phòng Live và giá bán.';
+                    }
+                } elseif ($orders > 0 || $gross > 0) {
+                    $statusCode = 'EFFECTIVE';
+                    $statusLabel = 'Có đơn phân bổ (0đ chi phí)';
+                    $recommendation = 'Đơn hàng ghi nhận từ phân bổ phiên trước.';
+                }
+
+                $campaigns[] = [
+                    'campaign_id' => $cid,
+                    'campaign_name' => (string)($r['campaign_name'] ?: ('Chiến dịch LIVE ' . $cid)),
+                    'operation_status' => (string)($r['operation_status'] ?? 'ENABLE'),
+                    'is_active' => $isActive,
+                    'delivery_badge' => $isActive ? 'Đang chạy (Có chi tiêu)' : 'Đã tắt / 0đ',
+                    'active_days_count' => (int)($r['active_days_count'] ?? 0),
+                    'first_active_date' => $r['first_active_date'],
+                    'latest_stat_date' => $r['latest_stat_date'],
+                    'budget' => !empty($r['budget']) ? (float)$r['budget'] : null,
+                    'spend' => round($spend, 0),
+                    'gross_revenue' => round($gross, 0),
+                    'cancel_refund_amount' => $cancelRefundAmount,
+                    'realized_revenue' => $realizedRevenue,
+                    'orders' => $orders,
+                    'cancelled_orders' => $cancelOrders,
+                    'refunded_orders' => $refundOrders,
+                    'realized_orders' => $realizedOrders,
+                    'cpa' => $cpa,
+                    'gross_roi' => $grossRoi,
+                    'realized_roi' => $realizedRoi,
+                    'target_roi' => $effTargetRoi,
+                    'status_code' => $statusCode,
+                    'status_label' => $statusLabel,
+                    'recommendation' => $recommendation,
+                ];
+            }
+        } catch (\Throwable $t) {}
+
+        return $campaigns;
+    }
+
+    /**
+     * Returns detailed Products (SPU) sold in the shop during the period with gross, cancel/refund, and realized revenue.
+     */
+    private function fetchDetailedLiveProducts(string $shopId, string $startDate, string $endDate): array {
+        $products = [];
+        try {
+            // Load product catalog images
+            $catMap = [];
+            try {
+                $stmtCat = $this->db->prepare("SELECT product_id, MAX(product_name) as product_name, MAX(COALESCE(display_image_url, product_image, sku_image)) as img_url
+                    FROM `commerce_product_catalog` WHERE shop_id = ? GROUP BY product_id");
+                $stmtCat->execute([$shopId]);
+                while ($cr = $stmtCat->fetch(PDO::FETCH_ASSOC)) {
+                    $catMap[(string)$cr['product_id']] = $cr;
+                }
+            } catch (\Throwable $t) {}
+
+            $stmt = $this->db->prepare("SELECT
+                oi.product_id,
+                MAX(oi.product_name) as product_name,
+                MAX(oi.sku_image) as sku_image,
+                COUNT(DISTINCT o.platform_order_id) as total_orders,
+                COUNT(DISTINCT CASE WHEN o.order_status = 'CANCELLED' THEN o.platform_order_id ELSE NULL END) as cancelled_orders,
+                COUNT(DISTINCT CASE WHEN o.order_status IN ('RETURNED','REFUNDED') THEN o.platform_order_id ELSE NULL END) as refunded_orders,
+                SUM(oi.quantity) as units_sold,
+                SUM(oi.sale_price * oi.quantity) as gross_revenue,
+                SUM(CASE WHEN o.order_status IN ('CANCELLED','RETURNED','REFUNDED') THEN (oi.sale_price * oi.quantity) ELSE 0 END) as cancel_refund_loss,
+                SUM(CASE WHEN o.order_status NOT IN ('CANCELLED','RETURNED','REFUNDED') THEN (oi.sale_price * oi.quantity) ELSE 0 END) as realized_revenue
+                FROM `commerce_order_items` oi
+                INNER JOIN `commerce_orders` o ON oi.order_id = o.id
+                WHERE o.shop_id = ? AND o.platform_created_at >= ? AND o.platform_created_at <= ?
+                GROUP BY oi.product_id
+                ORDER BY realized_revenue DESC, gross_revenue DESC");
+            $stmt->execute([$shopId, $startDate . ' 00:00:00', $endDate . ' 23:59:59']);
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+            $totalShopRealized = 0.0;
+            foreach ($rows as $r) {
+                $totalShopRealized += (float)($r['realized_revenue'] ?? 0);
+            }
+
+            foreach ($rows as $r) {
+                $pid = (string)$r['product_id'];
+                $cat = $catMap[$pid] ?? null;
+                $pName = !empty($r['product_name']) ? (string)$r['product_name'] : ($cat['product_name'] ?? ('Sản phẩm ' . $pid));
+                $pImg = !empty($r['sku_image']) ? (string)$r['sku_image'] : ($cat['img_url'] ?? null);
+                $isMain = (mb_stripos($pName, 'sủi', 0, 'UTF-8') !== false || mb_stripos($pName, 'mát gan', 0, 'UTF-8') !== false);
+
+                $gross = (float)($r['gross_revenue'] ?? 0);
+                $loss = (float)($r['cancel_refund_loss'] ?? 0);
+                $realized = (float)($r['realized_revenue'] ?? 0);
+                $orders = (int)($r['total_orders'] ?? 0);
+                $cancOrd = (int)($r['cancelled_orders'] ?? 0);
+                $refOrd = (int)($r['refunded_orders'] ?? 0);
+
+                $products[] = [
+                    'product_id' => $pid,
+                    'product_name' => $pName,
+                    'product_image' => $pImg,
+                    'is_main_sku' => $isMain,
+                    'sku_role_label' => $isMain ? 'Sản phẩm chủ lực (80%)' : 'Sản phẩm phụ (20%)',
+                    'orders_count' => $orders,
+                    'units_sold' => (int)($r['units_sold'] ?? 0),
+                    'cancelled_orders' => $cancOrd,
+                    'refunded_orders' => $refOrd,
+                    'cancel_refund_rate_pct' => $orders > 0 ? round((($cancOrd + $refOrd) / $orders) * 100, 1) : 0.0,
+                    'gross_revenue' => round($gross, 0),
+                    'cancel_refund_loss' => round($loss, 0),
+                    'realized_revenue' => round($realized, 0),
+                    'share_of_shop_pct' => $totalShopRealized > 0 ? round(($realized / $totalShopRealized) * 100, 1) : 0.0,
+                ];
+            }
+        } catch (\Throwable $t) {}
+
+        return $products;
     }
 }
 

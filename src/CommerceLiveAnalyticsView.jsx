@@ -61,6 +61,7 @@ export default function CommerceLiveAnalyticsView({
   const [syncLoading, setSyncLoading] = useState(false);
   const [syncStatus, setSyncStatus] = useState(null);
   const [showInactiveSessions, setShowInactiveSessions] = useState(false);
+  const [showInactiveLiveCampaigns, setShowInactiveLiveCampaigns] = useState(false);
 
   const fetchLiveAnalytics = useCallback(async (overrideParams = null) => {
     setIsLoading(true);
@@ -114,15 +115,15 @@ export default function CommerceLiveAnalyticsView({
     setSyncStatus(null);
     try {
       const res = await apiRequest(
-        `commerce_dashboard.php?action=trigger_sync&domain=ads_lives&shop_id=${encodeURIComponent(shopId || '')}&start_date=${encodeURIComponent(startDate || '')}&end_date=${encodeURIComponent(endDate || '')}`,
+        `commerce_dashboard.php?action=trigger_sync&domain=ads_all&shop_id=${encodeURIComponent(shopId || '')}&start_date=${encodeURIComponent(startDate || '')}&end_date=${encodeURIComponent(endDate || '')}`,
         'POST',
-        { shop_id: shopId, domain: 'ads_lives', start_date: startDate, end_date: endDate }
+        { shop_id: shopId, domain: 'ads_all', start_date: startDate, end_date: endDate }
       );
       if (res && res.success) {
         const syncedCount = res.data?.records_ingested ?? res.records_ingested ?? res.data?.synced_count ?? null;
         const msg = res.message || res.data?.message || (syncedCount !== null
-          ? `Đã đồng bộ thành công ${syncedCount} bản ghi Ca Live từ TikTok (${startDate} → ${endDate}).`
-          : `Đã đồng bộ dữ liệu Ca Live thực tế từ TikTok (${startDate} → ${endDate}).`);
+          ? `Đã đồng bộ thành công ${syncedCount} bản ghi Chiến dịch & Ca Live từ TikTok (${startDate} → ${endDate}).`
+          : `Đã đồng bộ dữ liệu Chiến dịch, Ca Live & Sản phẩm thực tế từ TikTok (${startDate} → ${endDate}).`);
         setSyncStatus({ type: 'success', message: msg });
         await fetchLiveAnalytics();
       } else {
@@ -994,6 +995,265 @@ export default function CommerceLiveAnalyticsView({
         </div>
       )}
 
+      {/* 1B. Detailed LIVE GMV Max Campaigns & Products Breakdown */}
+      {sopData && (() => {
+        const allLiveCamps = sopData.live_campaigns || [];
+        const activeLiveCamps = allLiveCamps.filter((c) => c.is_active);
+        const inactiveLiveCampsCount = allLiveCamps.length - activeLiveCamps.length;
+        const visibleLiveCamps = showInactiveLiveCampaigns ? allLiveCamps : activeLiveCamps;
+        const liveProds = sopData.live_products || [];
+
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+            {/* Table 1: Detailed LIVE GMV Max Campaigns */}
+            <div style={{
+              background: '#ffffff',
+              border: '1px solid #e2e8f0',
+              borderRadius: '12px',
+              padding: '18px 20px',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '12px' }}>
+                <div>
+                  <h4 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Radio size={17} color="#dc2626" />
+                    Báo Cáo Chi Tiết Theo Từng Chiến Dịch LIVE GMV Max ({activeLiveCamps.length} chiến dịch có phát sinh số liệu)
+                  </h4>
+                  <span style={{ fontSize: '12px', color: '#64748b' }}>
+                    Đã trừ tỷ lệ đơn hủy &amp; hoàn hàng thực tế của cửa hàng ({sopData.period?.shop_loss_rate_pct || 0}%) để tính đúng Doanh số thực và Hiệu quả thu/chi thực
+                  </span>
+                </div>
+
+                {inactiveLiveCampsCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowInactiveLiveCampaigns((v) => !v)}
+                    style={{
+                      padding: '6px 12px',
+                      borderRadius: '8px',
+                      border: '1px solid #cbd5e1',
+                      background: '#f8fafc',
+                      color: '#334155',
+                      fontSize: '12px',
+                      fontWeight: '600',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {showInactiveLiveCampaigns
+                      ? `Ẩn ${inactiveLiveCampsCount} chiến dịch LIVE đã tắt / 0đ`
+                      : `Hiện thêm ${inactiveLiveCampsCount} chiến dịch LIVE đã tắt / 0đ`}
+                  </button>
+                )}
+              </div>
+
+              {visibleLiveCamps.length === 0 ? (
+                <div style={{ padding: '20px', textAlign: 'center', color: '#64748b', background: '#f8fafc', borderRadius: '8px', fontSize: '13px' }}>
+                  Chưa có chiến dịch LIVE GMV Max nào phát sinh chi tiêu trong kỳ ({startDate} → {endDate}). Hãy bấm nút &ldquo;🔄 Đồng bộ Ca LIVE thực tế từ TikTok&rdquo; ở trên.
+                </div>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'left' }}>
+                    <thead>
+                      <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0', color: '#475569' }}>
+                        <th style={{ padding: '10px 12px' }}>Chiến dịch LIVE GMV Max</th>
+                        <th style={{ padding: '10px 10px', textAlign: 'center' }}>Trạng thái</th>
+                        <th style={{ padding: '10px 10px', textAlign: 'right' }}>Chi phí QC</th>
+                        <th style={{ padding: '10px 10px', textAlign: 'right' }}>Doanh số gộp</th>
+                        <th style={{ padding: '10px 10px', textAlign: 'right', color: '#b91c1c' }}>Trừ Hủy / Hoàn</th>
+                        <th style={{ padding: '10px 10px', textAlign: 'right', color: '#047857' }}>Doanh số thực</th>
+                        <th style={{ padding: '10px 10px', textAlign: 'right' }}>Đơn hàng (Hủy/Hoàn)</th>
+                        <th style={{ padding: '10px 10px', textAlign: 'center' }}>Thu/chi thực vs Mục tiêu</th>
+                        <th style={{ padding: '10px 12px' }}>Đánh giá &amp; Đề xuất tối ưu</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {visibleLiveCamps.map((c) => {
+                        const isGood = c.status_code === 'EFFECTIVE';
+                        const isWaste = c.status_code === 'WASTE';
+                        return (
+                          <tr key={c.campaign_id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                            <td style={{ padding: '10px 12px', maxWidth: '250px' }}>
+                              <div style={{ fontWeight: '700', color: '#0f172a', fontSize: '13px' }}>{c.campaign_name}</div>
+                              <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
+                                Mã CD: <code>{c.campaign_id}</code> • {c.active_days_count || 0} ngày chạy
+                              </div>
+                            </td>
+                            <td style={{ padding: '10px 10px', textAlign: 'center' }}>
+                              <span style={{
+                                display: 'inline-block',
+                                padding: '3px 8px',
+                                borderRadius: '999px',
+                                fontSize: '11px',
+                                fontWeight: '700',
+                                background: c.is_active ? '#dcfce7' : '#f1f5f9',
+                                color: c.is_active ? '#15803d' : '#64748b'
+                              }}>
+                                {c.delivery_badge}
+                              </span>
+                            </td>
+                            <td style={{ padding: '10px 10px', textAlign: 'right', fontWeight: '700', color: '#0f172a' }}>
+                              {formatVND(c.spend)}
+                              {c.cpa !== null && (
+                                <div style={{ fontSize: '10px', color: '#64748b', fontWeight: '500' }}>
+                                  {formatVND(c.cpa)}/đơn
+                                </div>
+                              )}
+                            </td>
+                            <td style={{ padding: '10px 10px', textAlign: 'right', fontWeight: '600', color: '#334155' }}>
+                              {formatVND(c.gross_revenue)}
+                            </td>
+                            <td style={{ padding: '10px 10px', textAlign: 'right', color: '#dc2626', fontWeight: '600' }}>
+                              {c.cancel_refund_amount > 0 ? `-${formatVND(c.cancel_refund_amount)}` : '0 ₫'}
+                            </td>
+                            <td style={{ padding: '10px 10px', textAlign: 'right', fontWeight: '800', color: '#059669', fontSize: '13px' }}>
+                              {formatVND(c.realized_revenue)}
+                            </td>
+                            <td style={{ padding: '10px 10px', textAlign: 'right' }}>
+                              <div style={{ fontWeight: '700', color: '#0f172a' }}>{formatNumber(c.orders)} đơn</div>
+                              <div style={{ fontSize: '10px', color: '#dc2626' }}>
+                                Hủy: {c.cancelled_orders || 0} • Hoàn: {c.refunded_orders || 0}
+                              </div>
+                            </td>
+                            <td style={{ padding: '10px 10px', textAlign: 'center' }}>
+                              <div style={{
+                                fontWeight: '800',
+                                fontSize: '13px',
+                                color: isGood ? '#059669' : isWaste ? '#dc2626' : '#d97706'
+                              }}>
+                                {c.realized_roi !== null && c.realized_roi !== undefined ? `${c.realized_roi} lần` : '—'}
+                                <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '500' }}> / {c.target_roi} lần</span>
+                              </div>
+                              {c.gross_roi !== null && c.gross_roi !== undefined && (
+                                <div style={{ fontSize: '10px', color: '#64748b' }}>
+                                  (Trước hủy/hoàn: {c.gross_roi} lần)
+                                </div>
+                              )}
+                            </td>
+                            <td style={{ padding: '10px 12px', maxWidth: '280px', fontSize: '11px', color: '#334155', lineHeight: '1.45' }}>
+                              <div style={{
+                                display: 'inline-block',
+                                padding: '2px 6px',
+                                borderRadius: '4px',
+                                fontWeight: '700',
+                                fontSize: '10px',
+                                marginBottom: '3px',
+                                background: isGood ? '#dcfce7' : isWaste ? '#fef2f2' : '#fef3c7',
+                                color: isGood ? '#15803d' : isWaste ? '#b91c1c' : '#b45309'
+                              }}>
+                                {c.status_label}
+                              </div>
+                              <div>{c.recommendation}</div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* Table 2: Detailed Products Sold in Period */}
+            <div style={{
+              background: '#ffffff',
+              border: '1px solid #e2e8f0',
+              borderRadius: '12px',
+              padding: '18px 20px',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+            }}>
+              <div style={{ marginBottom: '12px' }}>
+                <h4 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: '#0f172a' }}>
+                  📦 Báo Cáo Chi Tiết Theo Từng Mã Sản Phẩm Bán Ra Trong Kỳ ({liveProds.length} sản phẩm)
+                </h4>
+                <span style={{ fontSize: '12px', color: '#64748b' }}>
+                  Thống kê số đơn, đơn hủy, đơn hoàn và doanh số thực nhận của từng mã sản phẩm phục vụ phiên Live
+                </span>
+              </div>
+
+              {liveProds.length === 0 ? (
+                <div style={{ padding: '16px', textAlign: 'center', color: '#64748b', background: '#f8fafc', borderRadius: '8px', fontSize: '12px' }}>
+                  Chưa có đơn hàng sản phẩm phát sinh trong kỳ đang chọn.
+                </div>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'left' }}>
+                    <thead>
+                      <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0', color: '#475569' }}>
+                        <th style={{ padding: '10px 12px' }}>Sản phẩm &amp; Mã SP</th>
+                        <th style={{ padding: '10px 10px', textAlign: 'center' }}>Nhóm sản phẩm</th>
+                        <th style={{ padding: '10px 10px', textAlign: 'right' }}>Tổng đơn</th>
+                        <th style={{ padding: '10px 10px', textAlign: 'right', color: '#b91c1c' }}>Đơn hủy / Đơn hoàn</th>
+                        <th style={{ padding: '10px 10px', textAlign: 'right' }}>Doanh số gộp</th>
+                        <th style={{ padding: '10px 10px', textAlign: 'right', color: '#b91c1c' }}>Tiền hủy / hoàn</th>
+                        <th style={{ padding: '10px 10px', textAlign: 'right', color: '#047857' }}>Doanh số thực nhận</th>
+                        <th style={{ padding: '10px 10px', textAlign: 'right' }}>Tỷ trọng doanh số</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {liveProds.map((p) => (
+                        <tr key={p.product_id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                          <td style={{ padding: '10px 12px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                              {p.product_image ? (
+                                <img
+                                  src={p.product_image}
+                                  alt={p.product_name}
+                                  style={{ width: '38px', height: '38px', borderRadius: '8px', objectFit: 'cover', border: '1px solid #e2e8f0', flexShrink: 0 }}
+                                />
+                              ) : (
+                                <div style={{ width: '38px', height: '38px', borderRadius: '8px', background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', color: '#64748b', flexShrink: 0 }}>
+                                  SP
+                                </div>
+                              )}
+                              <div>
+                                <div style={{ fontWeight: '700', color: '#0f172a', fontSize: '12px' }}>{p.product_name}</div>
+                                <div style={{ fontSize: '11px', color: '#64748b', fontFamily: 'monospace' }}>Mã SP: {p.product_id}</div>
+                              </div>
+                            </div>
+                          </td>
+                          <td style={{ padding: '10px 10px', textAlign: 'center' }}>
+                            <span style={{
+                              padding: '3px 8px',
+                              borderRadius: '999px',
+                              fontSize: '11px',
+                              fontWeight: '700',
+                              background: p.is_main_sku ? '#dcfce7' : '#eff6ff',
+                              color: p.is_main_sku ? '#15803d' : '#1d4ed8'
+                            }}>
+                              {p.sku_role_label}
+                            </span>
+                          </td>
+                          <td style={{ padding: '10px 10px', textAlign: 'right', fontWeight: '700', color: '#0f172a' }}>
+                            {formatNumber(p.orders_count)} đơn
+                            <div style={{ fontSize: '10px', color: '#64748b', fontWeight: '400' }}>{formatNumber(p.units_sold)} sản phẩm</div>
+                          </td>
+                          <td style={{ padding: '10px 10px', textAlign: 'right', color: '#dc2626', fontWeight: '600' }}>
+                            Hủy: {p.cancelled_orders} • Hoàn: {p.refunded_orders}
+                            <div style={{ fontSize: '10px', color: '#64748b' }}>({p.cancel_refund_rate_pct}%)</div>
+                          </td>
+                          <td style={{ padding: '10px 10px', textAlign: 'right', color: '#334155', fontWeight: '600' }}>
+                            {formatVND(p.gross_revenue)}
+                          </td>
+                          <td style={{ padding: '10px 10px', textAlign: 'right', color: '#dc2626', fontWeight: '600' }}>
+                            {p.cancel_refund_loss > 0 ? `-${formatVND(p.cancel_refund_loss)}` : '0 ₫'}
+                          </td>
+                          <td style={{ padding: '10px 10px', textAlign: 'right', color: '#059669', fontWeight: '800', fontSize: '13px' }}>
+                            {formatVND(p.realized_revenue)}
+                          </td>
+                          <td style={{ padding: '10px 10px', textAlign: 'right', fontWeight: '700', color: '#2563eb' }}>
+                            {p.share_of_shop_pct}%
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* 2. Preserved 12 LIVE KPIs Grid with Plain Vietnamese Labels */}
       <div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
@@ -1149,9 +1409,10 @@ export default function CommerceLiveAnalyticsView({
 
           {/* KPI 12: Hiệu quả thu/chi từ Quảng cáo vs Toàn phiên Live */}
           {(() => {
-            const adsRoasVal = liveKpis?.ads_roas ?? liveKpis?.ads_roi;
+            const adsRoasVal = liveKpis?.ads_roas ?? liveKpis?.ads_roi ?? null;
+            const hasAdsRoas = adsRoasVal !== null && adsRoasVal !== undefined;
             const blendedVal = liveKpis?.blended_live_roas;
-            const ev = evalTarget(adsRoasVal, targets.ads_roi);
+            const ev = evalTarget(hasAdsRoas ? adsRoasVal : null, targets.ads_roi);
             return (
               <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '14px', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
@@ -1162,15 +1423,15 @@ export default function CommerceLiveAnalyticsView({
                     </span>
                   )}
                 </div>
-                <div style={{ fontSize: '18px', fontWeight: '800', color: adsRoasVal !== null ? (ev.passed ? '#15803d' : '#b45309') : '#64748b', marginTop: '4px' }}>
-                  {adsRoasVal !== null ? `${adsRoasVal} lần` : 'Chưa chạy quảng cáo'}
+                <div style={{ fontSize: '18px', fontWeight: '800', color: hasAdsRoas ? (ev.passed ? '#15803d' : '#b45309') : '#64748b', marginTop: '4px' }}>
+                  {hasAdsRoas ? `${adsRoasVal} lần` : 'Chưa có dữ liệu'}
                 </div>
-                <div style={{ fontSize: '10px', fontWeight: '700', color: ev.badgeColor, marginTop: '4px' }}>
-                  {adsRoasVal !== null ? ev.badgeText : 'Chi phí quảng cáo: 0 ₫'}
+                <div style={{ fontSize: '10px', fontWeight: '700', color: ev.badgeColor || '#64748b', marginTop: '4px' }}>
+                  {hasAdsRoas ? ev.badgeText : `Chi phí quảng cáo: ${formatVND(liveKpis?.ad_spend || 0)}`}
                 </div>
                 {liveKpis?.attributed_live_gmv > 0 && (
                   <div style={{ fontSize: '10px', color: '#64748b', marginTop: '2px' }}>
-                    Doanh số từ Quảng cáo: {formatVND(liveKpis.attributed_live_gmv)}
+                    Doanh số thực từ QC: {formatVND(liveKpis.realized_attributed_live_gmv ?? liveKpis.attributed_live_gmv)}
                   </div>
                 )}
               </div>
