@@ -441,24 +441,24 @@ class CommerceSopPacingService {
         $videoStats = $this->queryVideoAnalytics($shopId, $periodStart, $periodEnd);
 
         // Combine & compute metrics (preferring CommerceReportingService authoritative figures)
-        $repSummary = is_array($periodReport) ? ($periodReport['summary'] ?? []) : [];
+        $repCommerce = is_array($periodReport) ? ($periodReport['commerce'] ?? []) : [];
         $repAds = is_array($periodReport) ? ($periodReport['advertising'] ?? []) : [];
         $repAdsTotal = $repAds['total'] ?? [];
         $repAdsProd = $repAds['product_gmv_max'] ?? [];
         $repAdsLive = $repAds['live_gmv_max'] ?? [];
-        $mtdSummary = is_array($mtdReport) ? ($mtdReport['summary'] ?? []) : [];
+        $mtdCommerce = is_array($mtdReport) ? ($mtdReport['commerce'] ?? []) : [];
 
-        $hasRepSummary = !empty($repSummary) && isset($repSummary['realized_revenue']);
-        $totalShopGmv = $hasRepSummary ? (float)$repSummary['realized_revenue'] : $ordersDaily['gross_gmv'];
-        $totalShopGrossGmv = $hasRepSummary ? (float)($repSummary['gross_sales'] ?? $totalShopGmv) : $ordersDaily['gross_gmv'];
-        $totalShopLoss = $hasRepSummary ? (float)($repSummary['loss_amount'] ?? 0) : 0.0;
-        $totalShopOrders = $hasRepSummary ? (int)($repSummary['total_orders'] ?? $ordersDaily['order_count']) : $ordersDaily['order_count'];
+        $hasRepSummary = !empty($repCommerce) && isset($repCommerce['realized_sales']);
+        $totalShopGmv = $hasRepSummary ? (float)$repCommerce['realized_sales'] : $ordersDaily['gross_gmv'];
+        $totalShopGrossGmv = $hasRepSummary ? (float)($repCommerce['gross_sales'] ?? $totalShopGmv) : $ordersDaily['gross_gmv'];
+        $totalShopLoss = $hasRepSummary ? (float)($repCommerce['loss_value'] ?? 0) : 0.0;
+        $totalShopOrders = $hasRepSummary ? (int)($repCommerce['total_orders'] ?? $ordersDaily['order_count']) : $ordersDaily['order_count'];
 
-        $mtdShopGmv = (!empty($mtdSummary) && isset($mtdSummary['realized_revenue']))
-            ? (float)$mtdSummary['realized_revenue']
+        $mtdShopGmv = (!empty($mtdCommerce) && isset($mtdCommerce['realized_sales']))
+            ? (float)$mtdCommerce['realized_sales']
             : $ordersMtd['gross_gmv'];
-        $mtdShopOrders = (!empty($mtdSummary) && isset($mtdSummary['total_orders']))
-            ? (int)$mtdSummary['total_orders']
+        $mtdShopOrders = (!empty($mtdCommerce) && isset($mtdCommerce['total_orders']))
+            ? (int)$mtdCommerce['total_orders']
             : $ordersMtd['order_count'];
 
         $hasRepAds = !empty($repAdsTotal) && isset($repAdsTotal['cost']);

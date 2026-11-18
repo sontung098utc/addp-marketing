@@ -27,10 +27,52 @@ class CommerceAdsIngestionService {
 
     private PDO $db;
     private TikTokGmvMaxApiClient $apiClient;
+    private static bool $roiWidened = false;
 
     public function __construct(?PDO $db = null, ?TikTokGmvMaxApiClient $apiClient = null) {
         $this->db = $db ?? getDBConnection();
         $this->apiClient = $apiClient ?? new TikTokGmvMaxApiClient();
+    }
+
+    /**
+     * Safely widens api_roi / derived_roi / roi columns on MariaDB/MySQL to DECIMAL(14,4)
+     * so high-ROI creatives (e.g. >999.9999x on tiny spend) never trigger SQLSTATE[22003] 1264.
+     */
+    private function ensureWideRoiColumns(): void {
+        if (self::$roiWidened) {
+            return;
+        }
+        self::$roiWidened = true;
+        try {
+            if ($this->db->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite') {
+                return;
+            }
+            $targets = [
+                'commerce_ads_campaign_daily' => ['roi', 'api_roi', 'derived_roi'],
+                'commerce_ads_product_daily' => ['api_roi', 'derived_roi'],
+                'commerce_ads_creative_daily' => ['api_roi', 'derived_roi'],
+                'commerce_ads_live_daily' => ['api_roi', 'derived_roi'],
+            ];
+            foreach ($targets as $tbl => $cols) {
+                $exists = $this->db->query("SHOW TABLES LIKE " . $this->db->quote($tbl))->fetchColumn();
+                if (!$exists) continue;
+                foreach ($cols as $col) {
+                    try {
+                        $this->db->exec("ALTER TABLE `{$tbl}` MODIFY COLUMN `{$col}` DECIMAL(14,4) NULL DEFAULT NULL");
+                    } catch (\Throwable $ignore) {}
+                }
+            }
+        } catch (\Throwable $t) {}
+    }
+
+    private function clampRoi(?float $val): ?float {
+        if ($val === null || !is_finite($val)) {
+            return null;
+        }
+        $rounded = round($val, 4);
+        if ($rounded > 999999.9999) return 999999.9999;
+        if ($rounded < -999999.9999) return -999999.9999;
+        return $rounded;
     }
 
     /**
@@ -468,10 +510,11 @@ class CommerceAdsIngestionService {
             ];
 
             if ($hasLineage) {
+                $this->ensureWideRoiColumns();
                 $params[':net_cost'] = $netCost;
                 $params[':promotion_type'] = $promotionType;
-                $params[':api_roi'] = $apiRoi;
-                $params[':derived_roi'] = $derivedRoi;
+                $params[':api_roi'] = $this->clampRoi($apiRoi);
+                $params[':derived_roi'] = $this->clampRoi($derivedRoi);
                 $params[':api_cost_per_order'] = $apiCpa;
                 $params[':derived_cpa'] = $derivedCpa;
                 $params[':api_version'] = 'v1.3';
@@ -1101,8 +1144,9 @@ class CommerceAdsIngestionService {
             $gross = (float)($m['gross_revenue'] ?? 0.0);
             $orders = (int)($m['orders'] ?? 0);
 
-            $apiRoi = isset($m['roi']) ? (float)$m['roi'] : null;
-            $derivedRoi = $cost > 0 ? round($gross / $cost, 4) : null;
+            $this->ensureWideRoiColumns();
+            $apiRoi = isset($m['roi']) ? $this->clampRoi((float)$m['roi']) : null;
+            $derivedRoi = $cost > 0 ? $this->clampRoi($gross / $cost) : null;
             $apiCpa = isset($m['cost_per_order']) ? (float)$m['cost_per_order'] : null;
             $derivedCpa = $orders > 0 ? round($cost / $orders, 2) : null;
 
@@ -1367,8 +1411,9 @@ class CommerceAdsIngestionService {
             $gross = (float)($m['gross_revenue'] ?? 0.0);
             $orders = (int)($m['orders'] ?? 0);
 
-            $apiRoi = isset($m['roi']) ? (float)$m['roi'] : null;
-            $derivedRoi = $cost > 0 ? round($gross / $cost, 4) : null;
+            $this->ensureWideRoiColumns();
+            $apiRoi = isset($m['roi']) ? $this->clampRoi((float)$m['roi']) : null;
+            $derivedRoi = $cost > 0 ? $this->clampRoi($gross / $cost) : null;
             $apiCpa = isset($m['cost_per_order']) ? (float)$m['cost_per_order'] : null;
             $derivedCpa = $orders > 0 ? round($cost / $orders, 2) : null;
 
@@ -1574,8 +1619,9 @@ class CommerceAdsIngestionService {
             $gross = (float)($m['gross_revenue'] ?? 0.0);
             $orders = (int)($m['orders'] ?? 0);
 
-            $apiRoi = isset($m['roi']) ? (float)$m['roi'] : null;
-            $derivedRoi = $cost > 0 ? round($gross / $cost, 4) : null;
+            $this->ensureWideRoiColumns();
+            $apiRoi = isset($m['roi']) ? $this->clampRoi((float)$m['roi']) : null;
+            $derivedRoi = $cost > 0 ? $this->clampRoi($gross / $cost) : null;
             $apiCpa = isset($m['cost_per_order']) ? (float)$m['cost_per_order'] : null;
             $derivedCpa = $orders > 0 ? round($cost / $orders, 2) : null;
 

@@ -648,187 +648,213 @@ export default function CommerceSopCommandCenterView({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
-      {/* Header Bar */}
+      {/* Header Bar (2-Tier Clean Layout) */}
       <div
         style={{
           display: 'flex',
-          flexWrap: 'wrap',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          gap: '12px',
+          flexDirection: 'column',
+          gap: '14px',
           background: '#ffffff',
-          padding: '16px 20px',
+          padding: '18px 22px',
           borderRadius: '14px',
-          border: '1px solid #e2e8f0'
+          border: '1px solid #e2e8f0',
+          boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04)'
         }}
       >
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Activity size={20} style={{ color: '#2563eb' }} />
-            <h2 style={{ margin: 0, fontSize: '17px', fontWeight: '700', color: '#0f172a' }}>
-              Bảng Theo Dõi Mục Tiêu & Cảnh Báo Hằng Ngày
-            </h2>
+        <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Activity size={20} style={{ color: '#2563eb' }} />
+              <h2 style={{ margin: 0, fontSize: '18px', fontWeight: '800', color: '#0f172a', letterSpacing: '-0.01em' }}>
+                Bảng Theo Dõi Mục Tiêu & Cảnh Báo Hằng Ngày
+              </h2>
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px', marginTop: '6px', fontSize: '12px', color: '#64748b' }}>
+              <span style={{ background: '#f1f5f9', padding: '2px 8px', borderRadius: '6px', color: '#334155' }}>
+                Hoàn vốn cửa hàng: <strong>{config.target_roi}x</strong>
+              </span>
+              <span style={{ background: '#f5f3ff', padding: '2px 8px', borderRadius: '6px', color: '#6d28d9' }}>
+                Video: <strong>{config.video_target_roi}x</strong>
+              </span>
+              <span style={{ background: '#fff1f2', padding: '2px 8px', borderRadius: '6px', color: '#be123c' }}>
+                Livestream: <strong>{config.live_target_roi}x</strong>
+              </span>
+              <span style={{ background: '#eff6ff', padding: '2px 8px', borderRadius: '6px', color: '#1d4ed8' }}>
+                Giới hạn chi/ngày: <strong>{formatVND(config.daily_spend_cap)}</strong>
+              </span>
+            </div>
           </div>
-          <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
-            Mục tiêu hoàn vốn toàn cửa hàng: <strong>{config.target_roi}x</strong> | Video: <strong>{config.video_target_roi}x</strong> | Livestream: <strong>{config.live_target_roi}x</strong> | Giới hạn chi/ngày: <strong>{formatVND(config.daily_spend_cap)}</strong>
+
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' }}>
+            <button
+              type="button"
+              onClick={handleSyncTikTok}
+              disabled={syncingTikTok}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '8px 13px',
+                background: '#0f766e',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: '8px',
+                fontSize: '12px',
+                fontWeight: '600',
+                cursor: 'pointer',
+                opacity: syncingTikTok ? 0.7 : 1,
+                whiteSpace: 'nowrap'
+              }}
+            >
+              <RefreshCw size={14} className={syncingTikTok ? 'spin' : ''} />
+              <span>{syncingTikTok ? 'Đang đồng bộ...' : 'Đồng bộ số liệu TikTok'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleCopyBriefing}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '8px 13px',
+                background: copiedBriefing ? '#16a34a' : '#0f172a',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: '8px',
+                fontSize: '12px',
+                fontWeight: '600',
+                cursor: 'pointer',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              {copiedBriefing ? <Check size={14} /> : <Copy size={14} />}
+              <span>{copiedBriefing ? 'Đã sao chép!' : 'Báo cáo Sáng (09:30)'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowBriefingPreview((v) => !v)}
+              style={{
+                padding: '8px 11px',
+                background: '#f8fafc',
+                color: '#334155',
+                border: '1px solid #cbd5e1',
+                borderRadius: '8px',
+                fontSize: '12px',
+                fontWeight: '600',
+                cursor: 'pointer',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              {showBriefingPreview ? 'Ẩn mẫu' : 'Xem mẫu'}
+            </button>
+
+            <button
+              type="button"
+              onClick={handleOpenSettings}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '8px 13px',
+                background: '#2563eb',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: '8px',
+                fontSize: '12px',
+                fontWeight: '600',
+                cursor: 'pointer',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              <Sliders size={14} />
+              <span>Cài đặt Mục tiêu</span>
+            </button>
           </div>
         </div>
 
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' }}>
-          {/* Bộ lọc nhanh: 1 ngày / 7 ngày / Từ đầu tháng / 30 ngày / Khoảng ngày */}
-          <div style={{ display: 'inline-flex', alignItems: 'center', background: '#f1f5f9', borderRadius: '8px', padding: '3px', gap: '2px' }}>
-            {[
-              { id: 'single', label: '1 ngày' },
-              { id: '7d', label: '7 ngày' },
-              { id: 'mtd', label: 'Đầu tháng → nay' },
-              { id: '30d', label: '30 ngày' },
-              { id: 'custom', label: 'Khoảng ngày' }
-            ].map((opt) => {
-              const active = filterMode === opt.id;
-              return (
-                <button
-                  key={opt.id}
-                  type="button"
-                  onClick={() => applyQuickRange(opt.id)}
-                  style={{
-                    padding: '5px 9px',
-                    borderRadius: '6px',
-                    border: 'none',
-                    fontSize: '12px',
-                    fontWeight: active ? '700' : '500',
-                    background: active ? '#ffffff' : 'transparent',
-                    color: active ? '#2563eb' : '#475569',
-                    boxShadow: active ? '0 1px 2px rgba(0,0,0,0.08)' : 'none',
-                    cursor: 'pointer'
+        {/* Row 2: Dedicated Time Range Filter Bar */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '10px', paddingTop: '12px', borderTop: '1px solid #f1f5f9' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' }}>
+            <div style={{ display: 'inline-flex', alignItems: 'center', background: '#f1f5f9', borderRadius: '8px', padding: '3px', gap: '2px' }}>
+              {[
+                { id: 'single', label: '1 ngày' },
+                { id: '7d', label: '7 ngày' },
+                { id: 'mtd', label: 'Đầu tháng → nay' },
+                { id: '30d', label: '30 ngày' },
+                { id: 'custom', label: 'Khoảng ngày' }
+              ].map((opt) => {
+                const active = filterMode === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => applyQuickRange(opt.id)}
+                    style={{
+                      padding: '5px 10px',
+                      borderRadius: '6px',
+                      border: 'none',
+                      fontSize: '12px',
+                      fontWeight: active ? '700' : '500',
+                      background: active ? '#ffffff' : 'transparent',
+                      color: active ? '#2563eb' : '#475569',
+                      boxShadow: active ? '0 1px 2px rgba(0,0,0,0.08)' : 'none',
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {filterMode === 'single' ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '8px', padding: '5px 10px' }}>
+                <Calendar size={14} style={{ color: '#475569' }} />
+                <input
+                  type="date"
+                  value={selectedDate}
+                  onChange={(e) => {
+                    setHasManualDate(true);
+                    setSelectedDate(e.target.value);
                   }}
-                >
-                  {opt.label}
-                </button>
-              );
-            })}
+                  style={{ border: 'none', background: 'transparent', fontSize: '13px', color: '#0f172a', outline: 'none' }}
+                />
+              </div>
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '8px', padding: '5px 10px' }}>
+                <Calendar size={14} style={{ color: '#475569' }} />
+                <input
+                  type="date"
+                  value={rangeStart}
+                  onChange={(e) => {
+                    setHasManualDate(true);
+                    setFilterMode('custom');
+                    setRangeStart(e.target.value);
+                  }}
+                  style={{ border: 'none', background: 'transparent', fontSize: '12px', color: '#0f172a', outline: 'none' }}
+                />
+                <span style={{ color: '#94a3b8', fontSize: '12px' }}>→</span>
+                <input
+                  type="date"
+                  value={rangeEnd}
+                  onChange={(e) => {
+                    setHasManualDate(true);
+                    setFilterMode('custom');
+                    setRangeEnd(e.target.value);
+                  }}
+                  style={{ border: 'none', background: 'transparent', fontSize: '12px', color: '#0f172a', outline: 'none' }}
+                />
+              </div>
+            )}
           </div>
 
-          {filterMode === 'single' ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '8px', padding: '5px 10px' }}>
-              <Calendar size={14} style={{ color: '#475569' }} />
-              <input
-                type="date"
-                value={selectedDate}
-                onChange={(e) => {
-                  setHasManualDate(true);
-                  setSelectedDate(e.target.value);
-                }}
-                style={{ border: 'none', background: 'transparent', fontSize: '13px', color: '#0f172a', outline: 'none' }}
-              />
-            </div>
-          ) : (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '8px', padding: '5px 10px' }}>
-              <Calendar size={14} style={{ color: '#475569' }} />
-              <input
-                type="date"
-                value={rangeStart}
-                onChange={(e) => {
-                  setHasManualDate(true);
-                  setFilterMode('custom');
-                  setRangeStart(e.target.value);
-                }}
-                style={{ border: 'none', background: 'transparent', fontSize: '12px', color: '#0f172a', outline: 'none' }}
-              />
-              <span style={{ color: '#94a3b8', fontSize: '12px' }}>→</span>
-              <input
-                type="date"
-                value={rangeEnd}
-                onChange={(e) => {
-                  setHasManualDate(true);
-                  setFilterMode('custom');
-                  setRangeEnd(e.target.value);
-                }}
-                style={{ border: 'none', background: 'transparent', fontSize: '12px', color: '#0f172a', outline: 'none' }}
-              />
-            </div>
-          )}
-
-          <button
-            type="button"
-            onClick={handleSyncTikTok}
-            disabled={syncingTikTok}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '8px 12px',
-              background: '#0f766e',
-              color: '#ffffff',
-              border: 'none',
-              borderRadius: '8px',
-              fontSize: '12px',
-              fontWeight: '600',
-              cursor: 'pointer',
-              opacity: syncingTikTok ? 0.7 : 1
-            }}
-          >
-            <RefreshCw size={14} className={syncingTikTok ? 'spin' : ''} />
-            <span>{syncingTikTok ? 'Đang đồng bộ TikTok...' : '🔄 Đồng bộ số liệu thực tế từ TikTok'}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={handleCopyBriefing}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '8px 12px',
-              background: copiedBriefing ? '#16a34a' : '#0f172a',
-              color: '#ffffff',
-              border: 'none',
-              borderRadius: '8px',
-              fontSize: '12px',
-              fontWeight: '600',
-              cursor: 'pointer'
-            }}
-          >
-            {copiedBriefing ? <Check size={14} /> : <Copy size={14} />}
-            <span>{copiedBriefing ? 'Đã sao chép Báo cáo Sáng!' : 'Sao chép Báo cáo Sáng (09:30)'}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setShowBriefingPreview((v) => !v)}
-            style={{
-              padding: '8px 10px',
-              background: '#f1f5f9',
-              color: '#334155',
-              border: '1px solid #cbd5e1',
-              borderRadius: '8px',
-              fontSize: '12px',
-              fontWeight: '600',
-              cursor: 'pointer'
-            }}
-          >
-            {showBriefingPreview ? 'Ẩn mẫu' : 'Xem mẫu'}
-          </button>
-
-          <button
-            type="button"
-            onClick={handleOpenSettings}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '8px 12px',
-              background: '#2563eb',
-              color: '#ffffff',
-              border: 'none',
-              borderRadius: '8px',
-              fontSize: '12px',
-              fontWeight: '600',
-              cursor: 'pointer'
-            }}
-          >
-            <Sliders size={14} />
-            <span>Cài đặt Mục tiêu & Ngân sách</span>
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '12px', color: '#475569', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '4px 10px' }}>
+              Kỳ đang xem: <strong>{(data?.days_count || 1) > 1 ? `${data.days_count} ngày` : '1 ngày'}</strong>
+            </span>
 
           <button
             type="button"
@@ -848,6 +874,7 @@ export default function CommerceSopCommandCenterView({
           >
             <RefreshCw size={14} />
           </button>
+          </div>
         </div>
       </div>
 
@@ -993,102 +1020,128 @@ export default function CommerceSopCommandCenterView({
       </div>
 
       {/* Pacing Cards Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(310px, 1fr))', gap: '16px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '16px' }}>
         {/* Card 1: Total Shop Pacing */}
-        <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '18px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '700', fontSize: '14px', color: '#0f172a' }}>
-              <ShoppingBag size={17} style={{ color: '#2563eb' }} />
-              <span>{(data?.days_count || 1) > 1 ? `Toàn Cửa Hàng (${data.days_count} ngày)` : 'Toàn Cửa Hàng (Ngày & Tháng)'}</span>
+        <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px', boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', borderBottom: '1px solid #f1f5f9', paddingBottom: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '800', fontSize: '15px', color: '#0f172a' }}>
+              <ShoppingBag size={18} style={{ color: '#2563eb' }} />
+              <span>{(data?.days_count || 1) > 1 ? `Toàn Cửa Hàng (${data.days_count} ngày)` : 'Toàn Cửa Hàng (Hôm nay)'}</span>
             </div>
-            <span style={{ fontSize: '12px', fontWeight: '700', color: (shop.ads_roi || 0) >= (config.target_roi || 13) ? '#16a34a' : '#dc2626' }}>
-              Hiệu quả thu/chi: {shop.ads_roi !== null && shop.ads_roi !== undefined ? `${shop.ads_roi}x` : 'Chưa có'} / {config.target_roi}x
+            <span style={{ fontSize: '12px', fontWeight: '700', whiteSpace: 'nowrap', padding: '3px 9px', borderRadius: '999px', background: (shop.ads_roi || 0) >= (config.target_roi || 13) ? '#dcfce7' : '#fee2e2', color: (shop.ads_roi || 0) >= (config.target_roi || 13) ? '#15803d' : '#b91c1c' }}>
+              Thu/chi: {shop.ads_roi !== null && shop.ads_roi !== undefined ? `${shop.ads_roi}x` : '—'} / {config.target_roi}x
             </span>
           </div>
 
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '5px' }}>
-              <span style={{ color: '#475569' }}>
-                {(data?.days_count || 1) > 1 ? `Doanh số ${data.days_count} ngày (${shop.actual_orders || 0} đơn)` : `Doanh số ngày (${shop.actual_orders || 0} đơn)`}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
+              <span style={{ color: '#475569', fontWeight: '600' }}>
+                Doanh số thực ({shop.actual_orders || 0} đơn)
               </span>
-              <span style={{ fontWeight: '700', color: '#0f172a' }}>{formatVND(shop.actual_gmv)} / {formatVND(shop.target_gmv)} ({shop.gmv_pacing_pct || 0}%)</span>
+              <span style={{ fontWeight: '700', color: '#2563eb', background: '#eff6ff', padding: '2px 7px', borderRadius: '6px', whiteSpace: 'nowrap' }}>
+                {shop.gmv_pacing_pct || 0}%
+              </span>
             </div>
-            <ProgressBar pct={shop.gmv_pacing_pct} color="#2563eb" />
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '17px', fontWeight: '800', color: '#0f172a', whiteSpace: 'nowrap' }}>{formatVND(shop.actual_gmv)}</span>
+              <span style={{ fontSize: '12px', color: '#64748b', whiteSpace: 'nowrap' }}>/ {formatVND(shop.target_gmv)}</span>
+            </div>
+            <ProgressBar pct={shop.gmv_pacing_pct} color="#2563eb" height={8} />
             {(shop.gross_gmv > 0 && shop.gross_gmv > shop.actual_gmv) && (
-              <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
-                Doanh số gộp (trước hủy/hoàn): <strong>{formatVND(shop.gross_gmv)}</strong> • Hủy/hoàn: <strong style={{ color: '#dc2626' }}>-{formatVND(shop.loss_amount || 0)}</strong>
+              <div style={{ fontSize: '11px', color: '#64748b' }}>
+                Doanh số gộp: <strong>{formatVND(shop.gross_gmv)}</strong> • Hủy/hoàn: <strong style={{ color: '#dc2626' }}>-{formatVND(shop.loss_amount || 0)}</strong>
               </div>
             )}
             {(data?.days_count || 1) > 1 && (
-              <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
+              <div style={{ fontSize: '11px', color: '#64748b' }}>
                 Trung bình/ngày: <strong>{formatVND(shop.avg_daily_gmv || 0)}</strong> (Mục tiêu/ngày: {formatVND(config.daily_gmv_target)})
               </div>
             )}
           </div>
 
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '5px' }}>
-              <span style={{ color: '#475569' }}>
-                {(data?.days_count || 1) > 1 ? `Chi tiêu ${data.days_count} ngày / Giới hạn` : 'Chi tiêu / Giới hạn chi/ngày'}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
+              <span style={{ color: '#475569', fontWeight: '600' }}>Tiền quảng cáo đã tiêu</span>
+              <span style={{ fontWeight: '700', color: (shop.spend_pacing_pct || 0) > 100 ? '#dc2626' : '#0284c7', background: '#f0f9ff', padding: '2px 7px', borderRadius: '6px', whiteSpace: 'nowrap' }}>
+                {shop.spend_pacing_pct || 0}%
               </span>
-              <span style={{ fontWeight: '700', color: '#0f172a' }}>{formatVND(shop.actual_spend)} / {formatVND(shop.daily_spend_cap)} ({shop.spend_pacing_pct || 0}%)</span>
             </div>
-            <ProgressBar pct={shop.spend_pacing_pct} color={(shop.spend_pacing_pct || 0) > 100 ? '#dc2626' : '#0ea5e9'} />
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '16px', fontWeight: '800', color: '#0f172a', whiteSpace: 'nowrap' }}>{formatVND(shop.actual_spend)}</span>
+              <span style={{ fontSize: '12px', color: '#64748b', whiteSpace: 'nowrap' }}>/ Giới hạn {formatVND(shop.daily_spend_cap)}</span>
+            </div>
+            <ProgressBar pct={shop.spend_pacing_pct} color={(shop.spend_pacing_pct || 0) > 100 ? '#dc2626' : '#0ea5e9'} height={8} />
           </div>
 
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '5px' }}>
-              <span style={{ color: '#475569' }}>Doanh số từ đầu tháng ({shop.mtd_orders || 0} đơn)</span>
-              <span style={{ fontWeight: '700', color: '#0f172a' }}>{formatVND(shop.mtd_gmv)} / {formatVND(shop.monthly_gmv_target)} ({shop.monthly_gmv_pacing_pct || 0}%)</span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', background: '#f8fafc', padding: '10px 12px', borderRadius: '10px', border: '1px solid #f1f5f9' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
+              <span style={{ color: '#475569', fontWeight: '600' }}>Lũy kế đầu tháng ({shop.mtd_orders || 0} đơn)</span>
+              <span style={{ fontWeight: '700', color: '#4f46e5', whiteSpace: 'nowrap' }}>{shop.monthly_gmv_pacing_pct || 0}%</span>
             </div>
-            <ProgressBar pct={shop.monthly_gmv_pacing_pct} color="#6366f1" height={8} />
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '15px', fontWeight: '800', color: '#0f172a', whiteSpace: 'nowrap' }}>{formatVND(shop.mtd_gmv)}</span>
+              <span style={{ fontSize: '12px', color: '#64748b', whiteSpace: 'nowrap' }}>/ {formatVND(shop.monthly_gmv_target)}</span>
+            </div>
+            <ProgressBar pct={shop.monthly_gmv_pacing_pct} color="#6366f1" height={7} />
           </div>
         </div>
 
         {/* Card 2: Video / Product & Affiliate (75%) */}
-        <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '18px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '700', fontSize: '14px', color: '#0f172a' }}>
-              <Video size={17} style={{ color: '#7c3aed' }} />
-              <span>Kênh Video & Tiếp thị liên kết ({video.split_pct ?? 75}%)</span>
+        <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px', boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', borderBottom: '1px solid #f1f5f9', paddingBottom: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '800', fontSize: '15px', color: '#0f172a' }}>
+              <Video size={18} style={{ color: '#7c3aed' }} />
+              <span>Kênh Video & Tiếp thị ({video.split_pct ?? 75}%)</span>
             </div>
-            <span style={{ fontSize: '12px', fontWeight: '700', color: (video.actual_roi || 0) >= (config.video_target_roi || 15) ? '#16a34a' : '#d97706' }}>
-              Hiệu quả: {video.actual_roi !== null && video.actual_roi !== undefined ? `${video.actual_roi}x` : 'Chưa có'} / {config.video_target_roi}x
+            <span style={{ fontSize: '12px', fontWeight: '700', whiteSpace: 'nowrap', padding: '3px 9px', borderRadius: '999px', background: (video.actual_roi || 0) >= (config.video_target_roi || 15) ? '#dcfce7' : '#fef3c7', color: (video.actual_roi || 0) >= (config.video_target_roi || 15) ? '#15803d' : '#b45309' }}>
+              Thu/chi: {video.actual_roi !== null && video.actual_roi !== undefined ? `${video.actual_roi}x` : '—'} / {config.video_target_roi}x
             </span>
           </div>
 
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '5px' }}>
-              <span style={{ color: '#475569' }}>Doanh số Video</span>
-              <span style={{ fontWeight: '700', color: '#0f172a' }}>{formatVND(video.actual_gmv)} / {formatVND(video.target_gmv)} ({video.gmv_pacing_pct || 0}%)</span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
+              <span style={{ color: '#475569', fontWeight: '600' }}>Doanh số từ Video</span>
+              <span style={{ fontWeight: '700', color: '#7c3aed', background: '#f5f3ff', padding: '2px 7px', borderRadius: '6px', whiteSpace: 'nowrap' }}>
+                {video.gmv_pacing_pct || 0}%
+              </span>
             </div>
-            <ProgressBar pct={video.gmv_pacing_pct} color="#7c3aed" />
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '17px', fontWeight: '800', color: '#0f172a', whiteSpace: 'nowrap' }}>{formatVND(video.actual_gmv)}</span>
+              <span style={{ fontSize: '12px', color: '#64748b', whiteSpace: 'nowrap' }}>/ {formatVND(video.target_gmv)}</span>
+            </div>
+            <ProgressBar pct={video.gmv_pacing_pct} color="#7c3aed" height={8} />
           </div>
 
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '5px' }}>
-              <span style={{ color: '#475569' }}>Chi tiêu Video / Giới hạn chi</span>
-              <span style={{ fontWeight: '700', color: '#0f172a' }}>{formatVND(video.actual_spend)} / {formatVND(video.daily_spend_cap)} ({video.spend_pacing_pct || 0}%)</span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
+              <span style={{ color: '#475569', fontWeight: '600' }}>Chi tiêu Video / Giới hạn chi</span>
+              <span style={{ fontWeight: '700', color: '#9333ea', background: '#faf5ff', padding: '2px 7px', borderRadius: '6px', whiteSpace: 'nowrap' }}>
+                {video.spend_pacing_pct || 0}%
+              </span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '16px', fontWeight: '800', color: '#0f172a', whiteSpace: 'nowrap' }}>{formatVND(video.actual_spend)}</span>
+              <span style={{ fontSize: '12px', color: '#64748b', whiteSpace: 'nowrap' }}>/ {formatVND(video.daily_spend_cap)}</span>
             </div>
             <ProgressBar pct={video.spend_pacing_pct} color="#a855f7" height={8} />
           </div>
 
           {/* 80% Main Product / 20% Secondary Product */}
-          <div style={{ background: '#f8fafc', borderRadius: '10px', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <div style={{ fontSize: '11px', fontWeight: '700', color: '#475569', textTransform: 'uppercase' }}>
-              Tỷ trọng sản phẩm ({mainSku.split_pct ?? 80}% Sản phẩm chính / {subSku.split_pct ?? 20}% Sản phẩm phụ)
+          <div style={{ background: '#f8fafc', borderRadius: '10px', padding: '12px', border: '1px solid #f1f5f9', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div style={{ fontSize: '11px', fontWeight: '700', color: '#475569' }}>
+              Tỷ trọng sản phẩm (Mục tiêu {mainSku.split_pct ?? 80}% Chính / {subSku.split_pct ?? 20}% Phụ)
             </div>
             <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '3px' }}>
-                <span>Sản phẩm chính: <strong>{mainSku.keyword || config.main_sku_keyword}</strong> (Thực tế: {mainSku.actual_share_pct || 0}%)</span>
-                <span style={{ fontWeight: '600' }}>{formatVND(mainSku.actual_gmv)} / {formatVND(mainSku.target_gmv)}</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', marginBottom: '4px', gap: '6px' }}>
+                <span style={{ color: '#0f172a' }}>Chính: <strong>{mainSku.keyword || config.main_sku_keyword}</strong></span>
+                <span style={{ fontWeight: '700', color: '#059669', whiteSpace: 'nowrap' }}>{mainSku.actual_share_pct || 0}% ({formatVND(mainSku.actual_gmv)})</span>
               </div>
               <ProgressBar pct={mainSku.gmv_pacing_pct} color="#10b981" height={6} />
             </div>
             <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '3px' }}>
-                <span>Sản phẩm phụ (Thực tế: {subSku.actual_share_pct || 0}%)</span>
-                <span style={{ fontWeight: '600' }}>{formatVND(subSku.actual_gmv)} / {formatVND(subSku.target_gmv)}</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', marginBottom: '4px', gap: '6px' }}>
+                <span style={{ color: '#475569' }}>Sản phẩm phụ</span>
+                <span style={{ fontWeight: '700', color: '#475569', whiteSpace: 'nowrap' }}>{subSku.actual_share_pct || 0}% ({formatVND(subSku.actual_gmv)})</span>
               </div>
               <ProgressBar pct={subSku.gmv_pacing_pct} color="#64748b" height={6} />
             </div>
@@ -1096,47 +1149,66 @@ export default function CommerceSopCommandCenterView({
         </div>
 
         {/* Card 3: LIVE Channel (25%) */}
-        <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '18px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '700', fontSize: '14px', color: '#0f172a' }}>
-              <Radio size={17} style={{ color: '#e11d48' }} />
+        <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px', boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', borderBottom: '1px solid #f1f5f9', paddingBottom: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '800', fontSize: '15px', color: '#0f172a' }}>
+              <Radio size={18} style={{ color: '#e11d48' }} />
               <span>Kênh Livestream ({live.split_pct ?? 25}%)</span>
             </div>
-            <span style={{ fontSize: '12px', fontWeight: '700', color: (live.actual_roi || 0) >= (config.live_target_roi || 13) ? '#16a34a' : '#d97706' }}>
-              Hiệu quả: {live.actual_roi !== null && live.actual_roi !== undefined ? `${live.actual_roi}x` : 'Chưa có'} / {config.live_target_roi}x
+            <span style={{ fontSize: '12px', fontWeight: '700', whiteSpace: 'nowrap', padding: '3px 9px', borderRadius: '999px', background: (live.actual_roi || 0) >= (config.live_target_roi || 13) ? '#dcfce7' : '#fef3c7', color: (live.actual_roi || 0) >= (config.live_target_roi || 13) ? '#15803d' : '#b45309' }}>
+              Thu/chi: {live.actual_roi !== null && live.actual_roi !== undefined ? `${live.actual_roi}x` : '—'} / {config.live_target_roi}x
             </span>
           </div>
 
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '5px' }}>
-              <span style={{ color: '#475569' }}>Doanh số Livestream</span>
-              <span style={{ fontWeight: '700', color: '#0f172a' }}>{formatVND(live.actual_gmv)} / {formatVND(live.target_gmv)} ({live.gmv_pacing_pct || 0}%)</span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
+              <span style={{ color: '#475569', fontWeight: '600' }}>Doanh số Livestream</span>
+              <span style={{ fontWeight: '700', color: '#e11d48', background: '#fff1f2', padding: '2px 7px', borderRadius: '6px', whiteSpace: 'nowrap' }}>
+                {live.gmv_pacing_pct || 0}%
+              </span>
             </div>
-            <ProgressBar pct={live.gmv_pacing_pct} color="#e11d48" />
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '17px', fontWeight: '800', color: '#0f172a', whiteSpace: 'nowrap' }}>{formatVND(live.actual_gmv)}</span>
+              <span style={{ fontSize: '12px', color: '#64748b', whiteSpace: 'nowrap' }}>/ {formatVND(live.target_gmv)}</span>
+            </div>
+            <ProgressBar pct={live.gmv_pacing_pct} color="#e11d48" height={8} />
           </div>
 
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '5px' }}>
-              <span style={{ color: '#475569' }}>Chi tiêu Livestream / Giới hạn chi</span>
-              <span style={{ fontWeight: '700', color: '#0f172a' }}>{formatVND(live.actual_spend)} / {formatVND(live.daily_spend_cap)} ({live.spend_pacing_pct || 0}%)</span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
+              <span style={{ color: '#475569', fontWeight: '600' }}>Chi tiêu Livestream / Giới hạn chi</span>
+              <span style={{ fontWeight: '700', color: '#be123c', background: '#fff1f2', padding: '2px 7px', borderRadius: '6px', whiteSpace: 'nowrap' }}>
+                {live.spend_pacing_pct || 0}%
+              </span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '16px', fontWeight: '800', color: '#0f172a', whiteSpace: 'nowrap' }}>{formatVND(live.actual_spend)}</span>
+              <span style={{ fontSize: '12px', color: '#64748b', whiteSpace: 'nowrap' }}>/ {formatVND(live.daily_spend_cap)}</span>
             </div>
             <ProgressBar pct={live.spend_pacing_pct} color="#f43f5e" height={8} />
           </div>
 
-          <div style={{ background: '#fff1f2', borderRadius: '10px', padding: '10px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', color: '#881337' }}>
-            <span>Phiên Livestream hôm nay:</span>
-            <strong>{live.sessions_today || 0} / {live.sessions_target || 2} phiên (Mục tiêu/phiên: {formatVND(live.per_session_gmv_target)})</strong>
+          <div style={{ background: '#fff1f2', borderRadius: '10px', padding: '12px', border: '1px solid #ffe4e6', display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: '#881337' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>{(data?.days_count || 1) > 1 ? `Phiên Livestream (${data.days_count} ngày):` : 'Phiên Livestream hôm nay:'}</span>
+              <strong style={{ whiteSpace: 'nowrap' }}>{live.sessions_today || 0} / {live.sessions_target || 2} phiên</strong>
+            </div>
+            <div style={{ fontSize: '11px', color: '#9f1239' }}>
+              Mục tiêu doanh số mỗi phiên: <strong>{formatVND(live.per_session_gmv_target)}</strong>
+            </div>
           </div>
         </div>
       </div>
 
       {/* Campaign Breakdown Table */}
-      <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '16px 20px' }}>
+      <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '18px 22px', boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04)' }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '700', fontSize: '14px', color: '#0f172a' }}>
             <TrendingUp size={16} style={{ color: '#2563eb' }} />
             <span>
-              Chiến dịch quảng cáo đang chạy ngày {selectedDate} ({displayedCampaigns.length} chiến dịch)
+              {(data?.days_count || 1) > 1
+                ? `Chiến dịch quảng cáo đang chạy (${data.days_count} ngày: ${effectiveStart} → ${effectiveEnd} • ${displayedCampaigns.length} chiến dịch)`
+                : `Chiến dịch quảng cáo đang chạy ngày ${effectiveEnd} (${displayedCampaigns.length} chiến dịch)`}
             </span>
           </div>
 
