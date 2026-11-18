@@ -209,16 +209,32 @@ export default function CommerceLiveAnalyticsView({
   // Resolve active funnel based on selected scope
   const getActiveFunnelContext = () => {
     if (funnelScope === 'session_1' && slots.session_1?.funnel) {
-      return { title: 'Ca 1 (Sáng / Trưa trước 14:00)', funnel: slots.session_1.funnel };
+      return { title: 'Ca 1 — Sáng (< 14:00)', funnel: slots.session_1.funnel };
     }
     if (funnelScope === 'session_2' && slots.session_2?.funnel) {
-      return { title: 'Ca 2 (Chiều / Tối từ 14:00)', funnel: slots.session_2.funnel };
+      return { title: 'Ca 2 — Chiều (14:00 – 18:59)', funnel: slots.session_2.funnel };
+    }
+    if (funnelScope === 'session_3' && slots.session_3?.funnel) {
+      return { title: 'Ca 3 — Tối (≥ 19:00)', funnel: slots.session_3.funnel };
     }
     const matchedSess = sessionsList.find((s) => s.session_id === funnelScope);
     if (matchedSess && matchedSess.funnel) {
-      return { title: `${matchedSess.slot_label}: ${matchedSess.title}`, funnel: matchedSess.funnel };
+      return { title: `${matchedSess.slot_label}: ${matchedSess.title} (ID: ${matchedSess.session_id})`, funnel: matchedSess.funnel };
     }
     return { title: 'Tổng hợp toàn kỳ Live', funnel: sopData?.overall_funnel || null };
+  };
+
+  const formatDurationPretty = (seconds, hoursFallback) => {
+    if (seconds && Number(seconds) > 0) {
+      const sec = Number(seconds);
+      const h = Math.floor(sec / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      return `${h}h${m > 0 ? `${m}p` : '00p'}`;
+    }
+    if (hoursFallback !== null && hoursFallback !== undefined) {
+      return `${hoursFallback} giờ`;
+    }
+    return 'Chưa có';
   };
 
   const activeFunnelCtx = getActiveFunnelContext();
@@ -359,10 +375,10 @@ export default function CommerceLiveAnalyticsView({
           </div>
           <div>
             <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '700', color: '#0f172a' }}>
-              Theo Dõi 2 Ca Live, Cảnh Báo Ngân Sách 60% &amp; Chẩn Đoán 8 Chỉ Số
+              Theo Dõi 2–3 Ca Live/Ngày (Sáng • Chiều • Tối), Cảnh Báo Ngân Sách &amp; Chẩn Đoán Phiên Live
             </h3>
             <span style={{ fontSize: '12px', color: '#64748b' }}>
-              Ngân sách Live chiếm 25% tổng ngân sách (chia đều 2 ca/ngày) • Nguồn cấu hình: <strong>{formatConfigSource(sopConfig.source)}</strong>
+              Ngân sách Live chiếm 25% tổng ngân sách • Dữ liệu trực tiếp từ Trình quản lý LIVE TikTok Shop • Nguồn cấu hình: <strong>{formatConfigSource(sopConfig.source)}</strong>
             </span>
           </div>
         </div>
@@ -618,10 +634,10 @@ export default function CommerceLiveAnalyticsView({
         </div>
       )}
 
-      {/* 2-Session Tracking Cards (Ca 1 vs Ca 2) with Revenue Target Check */}
+      {/* 3-Session Tracking Cards (Ca 1 Sáng / Ca 2 Chiều / Ca 3 Tối) */}
       {sopData && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(310px, 1fr))', gap: '14px' }}>
-          {['session_1', 'session_2'].map((slotKey) => {
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '14px' }}>
+          {['session_1', 'session_2', 'session_3'].map((slotKey) => {
             const slot = slots[slotKey];
             if (!slot) return null;
             const badge = renderPacingBadge(slot.pacing_alert);
@@ -713,13 +729,13 @@ export default function CommerceLiveAnalyticsView({
                     <div style={{ fontWeight: '700', color: '#0f172a' }}>{slot.sessions_count > 0 ? formatVND(slot.total_gmv) : '—'}</div>
                   </div>
                   <div>
-                    <div style={{ color: '#64748b', fontSize: '11px' }}>Thu/chi Quảng cáo</div>
+                    <div style={{ color: '#64748b', fontSize: '11px' }}>Lượt hiển thị / Xem</div>
                     <div style={{ fontWeight: '700', color: '#2563eb' }}>
-                      {slotRoiMetric?.ads_roas !== null && slotRoiMetric?.ads_roas !== undefined ? `${slotRoiMetric.ads_roas} lần` : 'Chưa có'}
+                      {slot.sessions_count > 0 ? `${formatNumber(slot.total_impressions)} / ${formatNumber(slot.total_views)}` : '—'}
                     </div>
                   </div>
                   <div>
-                    <div style={{ color: '#64748b', fontSize: '11px' }}>Thu/chi toàn phiên</div>
+                    <div style={{ color: '#64748b', fontSize: '11px' }}>Thu/chi toàn ca</div>
                     <div style={{ fontWeight: '700', color: '#059669' }}>
                       {slotRoiMetric?.blended_roi !== null && slotRoiMetric?.blended_roi !== undefined ? `${slotRoiMetric.blended_roi} lần` : 'Chưa có'}
                     </div>
@@ -754,8 +770,9 @@ export default function CommerceLiveAnalyticsView({
             <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
               {[
                 { id: 'overall', label: 'Tổng hợp kỳ' },
-                { id: 'session_1', label: 'Ca 1 (Trước 14h)' },
-                { id: 'session_2', label: 'Ca 2 (Từ 14h)' }
+                { id: 'session_1', label: 'Ca 1 — Sáng (< 14h)' },
+                { id: 'session_2', label: 'Ca 2 — Chiều (14h–19h)' },
+                { id: 'session_3', label: 'Ca 3 — Tối (≥ 19h)' }
               ].map((tab) => (
                 <button
                   key={tab.id}
@@ -888,7 +905,7 @@ export default function CommerceLiveAnalyticsView({
             </table>
           </div>
 
-          {/* Individual Sessions List (Active/Spending by default) */}
+          {/* Individual Sessions List (Real Room IDs & 2-3 shifts/day) */}
           {sessionsList.length > 0 && (() => {
             const activeOnly = sessionsList.filter((s) => s.is_active !== false);
             const inactiveCount = sessionsList.length - activeOnly.length;
@@ -897,8 +914,8 @@ export default function CommerceLiveAnalyticsView({
             <div style={{ marginTop: '18px', borderTop: '1px solid #e2e8f0', paddingTop: '14px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '10px' }}>
                 <div style={{ fontSize: '13px', fontWeight: '700', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <Users size={15} color="#475569" />
-                  Chi tiết từng phiên Live đang hoạt động ({visibleSessions.length} phiên)
+                  <Users size={15} color="#2563eb" />
+                  Chi tiết từng phiên Live trên Sàn ({visibleSessions.length} phiên • Bấm &ldquo;Xem 8 chỉ số&rdquo; để chẩn đoán riêng từng ca)
                 </div>
                 {inactiveCount > 0 && (
                   <button
@@ -927,41 +944,111 @@ export default function CommerceLiveAnalyticsView({
               <div style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
                   <thead>
-                    <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', textAlign: 'left', color: '#64748b' }}>
-                      <th style={{ padding: '8px 10px' }}>Ca</th>
-                      <th style={{ padding: '8px 10px' }}>Tên phiên Live</th>
-                      <th style={{ padding: '8px 10px' }}>Thời lượng</th>
-                      <th style={{ padding: '8px 10px' }}>Tiền đã chi / Mức tiêu</th>
-                      <th style={{ padding: '8px 10px' }}>Doanh số</th>
-                      <th style={{ padding: '8px 10px' }}>Điểm yếu nhất</th>
+                    <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', textAlign: 'left', color: '#475569' }}>
+                      <th style={{ padding: '8px 10px' }}>Ca &amp; Thời gian</th>
+                      <th style={{ padding: '8px 10px' }}>Phiên LIVE &amp; Mã Room ID</th>
+                      <th style={{ padding: '8px 10px' }}>Thời lượng &amp; Xem TB</th>
+                      <th style={{ padding: '8px 10px', textAlign: 'right' }}>Hiển thị &amp; Lượt xem</th>
+                      <th style={{ padding: '8px 10px' }}>Tỷ lệ Vào phòng / CTR / Đặt hàng</th>
+                      <th style={{ padding: '8px 10px', textAlign: 'right' }}>Chi phí QC</th>
+                      <th style={{ padding: '8px 10px', textAlign: 'right' }}>GMV &amp; Số món bán</th>
+                      <th style={{ padding: '8px 10px', textAlign: 'center' }}>Thu/chi (ROI)</th>
+                      <th style={{ padding: '8px 10px' }}>Điểm yếu nhất cần sửa</th>
                       <th style={{ padding: '8px 10px' }}></th>
                     </tr>
                   </thead>
                   <tbody>
-                    {visibleSessions.slice(0, 15).map((s) => {
+                    {visibleSessions.slice(0, 25).map((s) => {
                       const pBadge = renderPacingBadge(s.pacing_alert);
+                      const isRowSelected = funnelScope === s.session_id;
+                      const slotColors = s.slot_key === 'session_1'
+                        ? { bg: '#eff6ff', color: '#1d4ed8' }
+                        : s.slot_key === 'session_2'
+                          ? { bg: '#fef3c7', color: '#b45309' }
+                          : { bg: '#f3e8ff', color: '#7e22ce' };
                       return (
-                        <tr key={s.session_id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                          <td style={{ padding: '8px 10px', fontWeight: '700' }}>{s.slot_label}</td>
-                          <td style={{ padding: '8px 10px' }}>
-                            <div style={{ fontWeight: '600', color: '#0f172a' }}>{s.title}</div>
-                            <div style={{ fontSize: '11px', color: '#64748b' }}>{s.start_time}</div>
+                        <tr key={s.session_id} style={{ borderBottom: '1px solid #f1f5f9', background: isRowSelected ? '#f8fafc' : 'transparent' }}>
+                          <td style={{ padding: '9px 10px' }}>
+                            <span style={{
+                              display: 'inline-block',
+                              padding: '2px 7px',
+                              borderRadius: '999px',
+                              fontSize: '11px',
+                              fontWeight: '700',
+                              background: slotColors.bg,
+                              color: slotColors.color,
+                              marginBottom: '3px'
+                            }}>
+                              {s.slot_label}
+                            </span>
+                            <div style={{ fontSize: '11px', color: '#334155', fontWeight: '600' }}>{s.start_time}</div>
                           </td>
-                          <td style={{ padding: '8px 10px', color: s.duration_alert?.is_short ? '#b91c1c' : '#0f172a', fontWeight: s.duration_alert?.is_short ? '700' : '400' }}>
-                            {s.duration_hours !== null ? `${s.duration_hours} giờ` : 'Chưa có'}
-                            {s.duration_alert?.is_short && ' (Ngắn)'}
+                          <td style={{ padding: '9px 10px' }}>
+                            <div style={{ fontWeight: '700', color: '#0f172a' }}>{s.title}</div>
+                            <div style={{ fontSize: '11px', color: '#64748b', fontFamily: 'monospace' }}>ID: {s.session_id}</div>
                           </td>
-                          <td style={{ padding: '8px 10px' }}>
-                            <div>{s.spend !== null ? formatVND(s.spend) : 'Chưa có'}</div>
+                          <td style={{ padding: '9px 10px' }}>
+                            <div style={{ color: s.duration_alert?.is_short ? '#b91c1c' : '#0f172a', fontWeight: '700' }}>
+                              {formatDurationPretty(s.duration_seconds, s.duration_hours)}
+                              {s.duration_alert?.is_short && (
+                                <span style={{ marginLeft: '4px', fontSize: '10px', background: '#fee2e2', color: '#b91c1c', padding: '1px 5px', borderRadius: '4px' }}>
+                                  Ngắn &lt;3h
+                                </span>
+                              )}
+                            </div>
+                            {(s.avg_watch_time_sec || s.views_over_1min) && (
+                              <div style={{ fontSize: '10px', color: '#64748b', marginTop: '2px' }}>
+                                {s.avg_watch_time_sec ? `Xem TB: ${s.avg_watch_time_sec}s` : ''}
+                                {s.views_over_1min ? ` • >1p: ${s.views_over_1min}` : ''}
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ padding: '9px 10px', textAlign: 'right' }}>
+                            <div style={{ fontWeight: '700', color: '#0f172a' }}>
+                              {s.impressions !== null ? `${formatNumber(s.impressions)} hiển thị` : '—'}
+                            </div>
+                            <div style={{ fontSize: '11px', color: '#2563eb', fontWeight: '600' }}>
+                              {s.total_views !== null ? `${formatNumber(s.total_views)} lượt xem` : ''}
+                              {s.unique_viewers ? ` (${formatNumber(s.unique_viewers)} người)` : ''}
+                            </div>
+                          </td>
+                          <td style={{ padding: '9px 10px', fontSize: '11px' }}>
+                            <div>
+                              Vào phòng:{' '}
+                              <strong style={{ color: (s.enter_room_rate_pct || 0) >= 5 ? '#15803d' : '#b45309' }}>
+                                {s.enter_room_rate_pct !== null && s.enter_room_rate_pct !== undefined ? `${s.enter_room_rate_pct}%` : '—'}
+                              </strong>
+                            </div>
+                            {s.ctr_live_pct !== null && s.ctr_live_pct !== undefined && (
+                              <div>
+                                CTR Live: <strong>{s.ctr_live_pct}%</strong>
+                                {s.sku_order_rate_pct ? ` • Đặt hàng: ${s.sku_order_rate_pct}%` : ''}
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ padding: '9px 10px', textAlign: 'right' }}>
+                            <div style={{ fontWeight: '700', color: '#0f172a' }}>{s.spend !== null ? formatVND(s.spend) : 'Chưa có'}</div>
                             <span style={{ fontSize: '10px', padding: '1px 5px', borderRadius: '4px', background: pBadge.bg, color: pBadge.color }}>
                               {pBadge.label}
                             </span>
                           </td>
-                          <td style={{ padding: '8px 10px', fontWeight: '700' }}>{s.gmv !== null ? formatVND(s.gmv) : 'Chưa có'}</td>
-                          <td style={{ padding: '8px 10px', color: s.weakest_link ? '#b91c1c' : '#15803d', fontSize: '11px', fontWeight: '600' }}>
+                          <td style={{ padding: '9px 10px', textAlign: 'right' }}>
+                            <div style={{ fontWeight: '800', color: '#059669', fontSize: '13px' }}>{s.gmv !== null ? formatVND(s.gmv) : 'Chưa có'}</div>
+                            <div style={{ fontSize: '10px', color: '#475569' }}>
+                              {s.units_sold ? `${s.units_sold} món` : ''}
+                              {s.gpm ? ` • GPM: ${formatVND(s.gpm)}` : ''}
+                            </div>
+                          </td>
+                          <td style={{ padding: '9px 10px', textAlign: 'center' }}>
+                            <div style={{ fontWeight: '800', color: (s.roi || 0) >= sopConfig.target_roi ? '#15803d' : '#d97706' }}>
+                              {s.roi !== null && s.roi !== undefined ? `${s.roi} lần` : '—'}
+                            </div>
+                            <div style={{ fontSize: '10px', color: '#64748b' }}>Mục tiêu {sopConfig.target_roi}x</div>
+                          </td>
+                          <td style={{ padding: '9px 10px', color: s.weakest_link ? '#b91c1c' : '#15803d', fontSize: '11px', fontWeight: '700' }}>
                             {s.weakest_link ? getMetricPlainLabel(s.weakest_link) : 'Đạt mục tiêu'}
                           </td>
-                          <td style={{ padding: '8px 10px' }}>
+                          <td style={{ padding: '9px 10px' }}>
                             <button
                               type="button"
                               onClick={() => setFunnelScope(s.session_id)}
@@ -969,13 +1056,14 @@ export default function CommerceLiveAnalyticsView({
                                 display: 'inline-flex',
                                 alignItems: 'center',
                                 gap: '3px',
-                                padding: '4px 8px',
-                                borderRadius: '5px',
-                                border: '1px solid #cbd5e1',
-                                background: funnelScope === s.session_id ? '#eff6ff' : '#ffffff',
-                                color: '#2563eb',
+                                padding: '5px 9px',
+                                borderRadius: '6px',
+                                border: '1px solid',
+                                borderColor: isRowSelected ? '#2563eb' : '#cbd5e1',
+                                background: isRowSelected ? '#2563eb' : '#ffffff',
+                                color: isRowSelected ? '#ffffff' : '#2563eb',
                                 fontSize: '11px',
-                                fontWeight: '600',
+                                fontWeight: '700',
                                 cursor: 'pointer'
                               }}
                             >
@@ -1254,12 +1342,12 @@ export default function CommerceLiveAnalyticsView({
         );
       })()}
 
-      {/* 2. Preserved 12 LIVE KPIs Grid with Plain Vietnamese Labels */}
+      {/* 2. 16 LIVE Workbench KPIs Grid with Plain Vietnamese Labels */}
       <div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
           <h4 style={{ margin: 0, fontSize: '14px', fontWeight: '700', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
             <Award size={16} color="#2563eb" />
-            Bộ 12 Chỉ Số Hiệu Suất Phiên Live (Chuẩn Mục Tiêu Shop)
+            Bộ 16 Chỉ Số Tổng Quan Dữ Liệu LIVE (Chuẩn TikTok Shop Live Workbench)
           </h4>
           <span style={{ fontSize: '11px', color: '#64748b' }}>
             Ngân sách quảng cáo tối thiểu khuyến nghị: <strong>{formatVND(sopConfig.session_budget_cap)}/ca</strong>
@@ -1273,7 +1361,7 @@ export default function CommerceLiveAnalyticsView({
         }}>
           {/* KPI 1 */}
           <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '14px', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
-            <div style={{ fontSize: '12px', color: '#64748b' }}>1. Lượt người thấy Live</div>
+            <div style={{ fontSize: '12px', color: '#64748b' }}>1. Lượt hiển thị LIVE</div>
             <div style={{ fontSize: '18px', fontWeight: '800', color: '#0f172a', marginTop: '4px' }}>
               {formatNumber(liveKpis?.impressions || 0)}
             </div>
@@ -1281,7 +1369,7 @@ export default function CommerceLiveAnalyticsView({
 
           {/* KPI 2 */}
           <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '14px', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
-            <div style={{ fontSize: '12px', color: '#64748b' }}>2. Lượt người vào xem</div>
+            <div style={{ fontSize: '12px', color: '#64748b' }}>2. Lượt xem LIVE</div>
             <div style={{ fontSize: '18px', fontWeight: '800', color: '#0f172a', marginTop: '4px' }}>
               {formatNumber(liveKpis?.total_views || 0)}
             </div>
@@ -1292,7 +1380,7 @@ export default function CommerceLiveAnalyticsView({
             const ev = evalTarget(liveKpis?.gmv_per_hour, targets.gmv_per_hour);
             return (
               <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '14px', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
-                <div style={{ fontSize: '12px', color: '#64748b' }}>3. Doanh số / Giờ</div>
+                <div style={{ fontSize: '12px', color: '#64748b' }}>3. GMV / Giờ</div>
                 <div style={{ fontSize: '18px', fontWeight: '800', color: ev.passed ? '#15803d' : '#b45309', marginTop: '4px' }}>
                   {formatVND(liveKpis?.gmv_per_hour || 0)}
                 </div>
@@ -1305,7 +1393,7 @@ export default function CommerceLiveAnalyticsView({
 
           {/* KPI 4 */}
           <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '14px', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
-            <div style={{ fontSize: '12px', color: '#64748b' }}>4. Lượt hiển thị / Giờ</div>
+            <div style={{ fontSize: '12px', color: '#64748b' }}>4. Lượt hiển thị mỗi giờ</div>
             <div style={{ fontSize: '18px', fontWeight: '800', color: '#0f172a', marginTop: '4px' }}>
               {formatNumber(liveKpis?.impressions_per_hour || 0)}
             </div>
@@ -1316,7 +1404,7 @@ export default function CommerceLiveAnalyticsView({
             const ev = evalTarget(liveKpis?.gpm, targets.gpm);
             return (
               <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '14px', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
-                <div style={{ fontSize: '12px', color: '#64748b' }}>5. Doanh số trên 1.000 lượt hiển thị</div>
+                <div style={{ fontSize: '12px', color: '#64748b' }}>5. GPM hiển thị (Doanh số/1.000 hiển thị)</div>
                 <div style={{ fontSize: '18px', fontWeight: '800', color: ev.passed ? '#15803d' : '#b45309', marginTop: '4px' }}>
                   {formatVND(liveKpis?.gpm || 0)}
                 </div>
@@ -1340,7 +1428,7 @@ export default function CommerceLiveAnalyticsView({
             const ev = evalTarget(liveKpis?.follow_rate, targets.follow_rate);
             return (
               <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '14px', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
-                <div style={{ fontSize: '12px', color: '#64748b' }}>7. Tỷ lệ bấm Theo dõi (%)</div>
+                <div style={{ fontSize: '12px', color: '#64748b' }}>7. Tỷ lệ theo dõi (%)</div>
                 <div style={{ fontSize: '18px', fontWeight: '800', color: ev.passed ? '#15803d' : '#b45309', marginTop: '4px' }}>
                   {liveKpis?.follow_rate ?? 0}%
                 </div>
@@ -1356,7 +1444,7 @@ export default function CommerceLiveAnalyticsView({
             const ev = evalTarget(liveKpis?.enter_room_rate, targets.enter_room_rate);
             return (
               <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '14px', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
-                <div style={{ fontSize: '12px', color: '#64748b' }}>8. Tỷ lệ bấm vào xem Live (%)</div>
+                <div style={{ fontSize: '12px', color: '#64748b' }}>8. Tỷ lệ nhấn (Vào phòng LIVE %)</div>
                 <div style={{ fontSize: '18px', fontWeight: '800', color: ev.passed ? '#15803d' : '#b45309', marginTop: '4px' }}>
                   {liveKpis?.enter_room_rate ?? 0}%
                 </div>
@@ -1380,7 +1468,7 @@ export default function CommerceLiveAnalyticsView({
             const ev = evalTarget(liveKpis?.ctr_live, targets.ctr_live);
             return (
               <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '14px', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
-                <div style={{ fontSize: '12px', color: '#64748b' }}>10. Tỷ lệ bấm giỏ hàng (%)</div>
+                <div style={{ fontSize: '12px', color: '#64748b' }}>10. CTR của LIVE (Bấm sản phẩm %)</div>
                 <div style={{ fontSize: '18px', fontWeight: '800', color: ev.passed ? '#15803d' : '#b45309', marginTop: '4px' }}>
                   {liveKpis?.ctr_live ?? 0}%
                 </div>
@@ -1396,7 +1484,7 @@ export default function CommerceLiveAnalyticsView({
             const ev = evalTarget(liveKpis?.sku_order_rate, targets.sku_order_rate);
             return (
               <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '14px', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
-                <div style={{ fontSize: '12px', color: '#64748b' }}>11. Tỷ lệ chốt đơn (%)</div>
+                <div style={{ fontSize: '12px', color: '#64748b' }}>11. Tỷ lệ đặt hàng (Đơn hàng SKU %)</div>
                 <div style={{ fontSize: '18px', fontWeight: '800', color: ev.passed ? '#15803d' : '#b45309', marginTop: '4px' }}>
                   {liveKpis?.sku_order_rate ?? 0}%
                 </div>
@@ -1437,6 +1525,50 @@ export default function CommerceLiveAnalyticsView({
               </div>
             );
           })()}
+
+          {/* KPI 13: Người xem duy nhất */}
+          <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '14px', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
+            <div style={{ fontSize: '12px', color: '#64748b' }}>13. Người xem duy nhất (Unique Viewers)</div>
+            <div style={{ fontSize: '18px', fontWeight: '800', color: '#0f172a', marginTop: '4px' }}>
+              {liveKpis?.unique_viewers ? `${formatNumber(liveKpis.unique_viewers)} người` : 'Chưa có'}
+            </div>
+            <div style={{ fontSize: '10px', color: '#64748b', marginTop: '4px' }}>
+              Tổng lượt xem: {formatNumber(liveKpis?.total_views || 0)}
+            </div>
+          </div>
+
+          {/* KPI 14: Thời lượng xem trung bình */}
+          <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '14px', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
+            <div style={{ fontSize: '12px', color: '#64748b' }}>14. Thời lượng xem trung bình / lượt</div>
+            <div style={{ fontSize: '18px', fontWeight: '800', color: (liveKpis?.avg_watch_time_sec || 0) >= 45 ? '#15803d' : '#b45309', marginTop: '4px' }}>
+              {liveKpis?.avg_watch_time_sec ? `${liveKpis.avg_watch_time_sec} giây` : 'Chưa có'}
+            </div>
+            <div style={{ fontSize: '10px', fontWeight: '700', color: (liveKpis?.avg_watch_time_sec || 0) >= 45 ? '#15803d' : '#b45309', marginTop: '4px' }}>
+              {(liveKpis?.avg_watch_time_sec || 0) >= 45 ? '✓ Giữ chân tốt (≥ 45s)' : '⚠ Thoát nhanh (Cần kéo lên ≥ 45s)'}
+            </div>
+          </div>
+
+          {/* KPI 15: Lượt xem > 1 phút */}
+          <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '14px', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
+            <div style={{ fontSize: '12px', color: '#64748b' }}>15. Lượt xem &gt; 1 phút</div>
+            <div style={{ fontSize: '18px', fontWeight: '800', color: '#2563eb', marginTop: '4px' }}>
+              {liveKpis?.views_over_1min ? `${formatNumber(liveKpis.views_over_1min)} lượt` : 'Chưa có'}
+            </div>
+            <div style={{ fontSize: '10px', color: '#64748b', marginTop: '4px' }}>
+              Khách ở lại xem sâu &gt; 60 giây
+            </div>
+          </div>
+
+          {/* KPI 16: Số món bán ra & Tỷ lệ thích */}
+          <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '14px', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
+            <div style={{ fontSize: '12px', color: '#64748b' }}>16. Số món bán ra &amp; Tỷ lệ thích</div>
+            <div style={{ fontSize: '18px', fontWeight: '800', color: '#059669', marginTop: '4px' }}>
+              {formatNumber(liveKpis?.units_sold || 0)} món
+            </div>
+            <div style={{ fontSize: '10px', color: '#64748b', marginTop: '4px' }}>
+              Tỷ lệ thích: <strong>{liveKpis?.like_rate ? `${liveKpis.like_rate}%` : '—'}</strong>
+            </div>
+          </div>
         </div>
       </div>
 

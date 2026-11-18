@@ -6,6 +6,7 @@ class TikTokShopClient {
     private $appSecret;
     private $baseUrl = "https://open-api.tiktokglobalshop.com";
     private static ?string $resolvedVideosEndpoint = null;
+    private static ?string $resolvedLivesEndpoint = null;
 
     public function __construct() {
         $this->appKey = TIKTOK_APP_KEY;
@@ -811,12 +812,12 @@ class TikTokShopClient {
     /**
      * Lấy chỉ số hiệu suất phiên phát trực tiếp (LIVE Stream Performance)
      * Scope: data.shop_analytics.public.read / creator.data.live.read.public
-     * Method: GET /analytics/202405/shop_lives/performance
+     * Auto-probes valid API versions: 202605, 202509, 202409, 202406, 202405, 202309
      */
     public function getShopLivesPerformance(string $accessToken, string $shopCipher, string $startDate, string $endDate, array $options = []): array {
-        $pageSize = isset($options['page_size']) ? (int)$options['page_size'] : 30;
+        $pageSize = isset($options['page_size']) ? (int)$options['page_size'] : 50;
         if ($pageSize < 1 || $pageSize > 50) {
-            $pageSize = 30;
+            $pageSize = 50;
         }
 
         $queryParams = [
@@ -840,11 +841,49 @@ class TikTokShopClient {
             $queryParams['account_type'] = (string)$options['account_type'];
         }
 
-        $path = defined('TIKTOK_API_ANALYTICS_LIVES_ENDPOINT') 
-            ? TIKTOK_API_ANALYTICS_LIVES_ENDPOINT 
-            : "/analytics/202405/shop_lives/performance";
+        $connectTimeout = defined('TIKTOK_API_CONNECT_TIMEOUT_SEC') ? TIKTOK_API_CONNECT_TIMEOUT_SEC : 5;
+        $readTimeout = defined('TIKTOK_API_READ_TIMEOUT_SEC') ? TIKTOK_API_READ_TIMEOUT_SEC : 30;
+        $maxRetries = defined('TIKTOK_API_RETRY_MAX_ATTEMPTS') ? TIKTOK_API_RETRY_MAX_ATTEMPTS : 3;
 
-        return $this->request("GET", $path, $queryParams, null, $accessToken);
+        if (self::$resolvedLivesEndpoint !== null) {
+            return $this->requestV2("GET", self::$resolvedLivesEndpoint, $queryParams, null, $accessToken, $connectTimeout, $readTimeout, $maxRetries);
+        }
+
+        $configuredEndpoint = defined('TIKTOK_API_ANALYTICS_LIVES_ENDPOINT') ? TIKTOK_API_ANALYTICS_LIVES_ENDPOINT : null;
+        $candidates = array_unique(array_filter([
+            "/analytics/202605/shop_lives/performance",
+            "/analytics/202509/shop_lives/performance",
+            "/analytics/202409/shop_lives/performance",
+            "/analytics/202406/shop_lives/performance",
+            "/analytics/202405/shop_lives/performance",
+            "/analytics/202309/shop_lives/performance",
+            $configuredEndpoint
+        ]));
+
+        $lastException = null;
+        foreach ($candidates as $candidatePath) {
+            try {
+                $res = $this->requestV2("GET", $candidatePath, $queryParams, null, $accessToken, $connectTimeout, $readTimeout, 1);
+                self::$resolvedLivesEndpoint = $candidatePath;
+                return $res;
+            } catch (\Throwable $e) {
+                $lastException = $e;
+                $msg = $e->getMessage();
+                $isVersionError = (
+                    stripos($msg, '36009004') !== false ||
+                    stripos($msg, 'Invalid API version') !== false ||
+                    (stripos($msg, 'version') !== false && stripos($msg, 'invalid') !== false) ||
+                    stripos($msg, 'HTTP 404') !== false
+                );
+                if ($isVersionError) {
+                    continue;
+                }
+                self::$resolvedLivesEndpoint = $candidatePath;
+                throw $e;
+            }
+        }
+
+        throw $lastException ?? new RuntimeException("Không tìm thấy phiên bản TikTok LIVE Analytics API phù hợp.");
     }
 
     /**
