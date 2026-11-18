@@ -49,8 +49,9 @@ export default function CommerceLiveAnalyticsView({
   const [isInteractiveMode, setIsInteractiveMode] = useState(false);
   const [showConfigPanel, setShowConfigPanel] = useState(false);
 
-  // Funnel diagnosis scope: 'overall' | 'session_1' | 'session_2' | session_id
+  // Funnel diagnosis scope: 'overall' | 'session_1' | 'session_2' | 'session_3' | session_id
   const [funnelScope, setFunnelScope] = useState('overall');
+  const [expandedSessionId, setExpandedSessionId] = useState(null);
 
   // AI Marketing Director state
   const [aiAnalysis, setAiAnalysis] = useState(null);
@@ -960,14 +961,20 @@ export default function CommerceLiveAnalyticsView({
                   <tbody>
                     {visibleSessions.slice(0, 25).map((s) => {
                       const pBadge = renderPacingBadge(s.pacing_alert);
-                      const isRowSelected = funnelScope === s.session_id;
+                      const isExpanded = expandedSessionId === s.session_id;
+                      const isRowSelected = isExpanded || funnelScope === s.session_id;
                       const slotColors = s.slot_key === 'session_1'
                         ? { bg: '#eff6ff', color: '#1d4ed8' }
                         : s.slot_key === 'session_2'
                           ? { bg: '#fef3c7', color: '#b45309' }
                           : { bg: '#f3e8ff', color: '#7e22ce' };
+                      const sessMetrics = s.funnel?.metrics || [];
+                      const sessWeakest = s.funnel?.weakest_link || s.weakest_link;
+                      const passedCount = sessMetrics.filter((m) => m.status === 'PASS').length;
+                      const evalCount = sessMetrics.filter((m) => m.status !== 'NO_DATA').length;
                       return (
-                        <tr key={s.session_id} style={{ borderBottom: '1px solid #f1f5f9', background: isRowSelected ? '#f8fafc' : 'transparent' }}>
+                        <React.Fragment key={s.session_id}>
+                        <tr style={{ borderBottom: isExpanded ? 'none' : '1px solid #f1f5f9', background: isRowSelected ? '#f8fafc' : 'transparent' }}>
                           <td style={{ padding: '9px 10px' }}>
                             <span style={{
                               display: 'inline-block',
@@ -1051,7 +1058,11 @@ export default function CommerceLiveAnalyticsView({
                           <td style={{ padding: '9px 10px' }}>
                             <button
                               type="button"
-                              onClick={() => setFunnelScope(s.session_id)}
+                              onClick={() => {
+                                const nextId = isExpanded ? null : s.session_id;
+                                setExpandedSessionId(nextId);
+                                setFunnelScope(s.session_id);
+                              }}
                               style={{
                                 display: 'inline-flex',
                                 alignItems: 'center',
@@ -1059,18 +1070,140 @@ export default function CommerceLiveAnalyticsView({
                                 padding: '5px 9px',
                                 borderRadius: '6px',
                                 border: '1px solid',
-                                borderColor: isRowSelected ? '#2563eb' : '#cbd5e1',
-                                background: isRowSelected ? '#2563eb' : '#ffffff',
-                                color: isRowSelected ? '#ffffff' : '#2563eb',
+                                borderColor: isExpanded ? '#1d4ed8' : '#cbd5e1',
+                                background: isExpanded ? '#1d4ed8' : '#ffffff',
+                                color: isExpanded ? '#ffffff' : '#2563eb',
                                 fontSize: '11px',
                                 fontWeight: '700',
-                                cursor: 'pointer'
+                                cursor: 'pointer',
+                                whiteSpace: 'nowrap'
                               }}
                             >
-                              Xem 8 chỉ số <ChevronRight size={12} />
+                              {isExpanded ? 'Đóng phân tích ▲' : 'Xem 8 chỉ số ▼'}
                             </button>
                           </td>
                         </tr>
+                        {isExpanded && (
+                          <tr style={{ background: '#f8fafc', borderBottom: '2px solid #cbd5e1' }}>
+                            <td colSpan={10} style={{ padding: '14px 16px' }}>
+                              <div style={{
+                                background: '#ffffff',
+                                border: '1px solid #bfdbfe',
+                                borderRadius: '10px',
+                                padding: '16px',
+                                boxShadow: '0 4px 12px rgba(37,99,235,0.08)'
+                              }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '12px', paddingBottom: '10px', borderBottom: '1px solid #e2e8f0' }}>
+                                  <div>
+                                    <div style={{ fontSize: '14px', fontWeight: '800', color: '#0f172a' }}>
+                                      Phân Tích &amp; Đánh Giá Theo 8 Chỉ Số — {s.slot_label}: {s.title}
+                                    </div>
+                                    <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
+                                      Mã phiên: <code>{s.session_id}</code> • Bắt đầu: <strong>{s.start_time}</strong> • Thời lượng: <strong>{formatDurationPretty(s.duration_seconds, s.duration_hours)}</strong> • Đạt <strong>{passedCount}/{evalCount || 8}</strong> chỉ số chuẩn SOP
+                                    </div>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => setExpandedSessionId(null)}
+                                    style={{
+                                      padding: '4px 10px',
+                                      borderRadius: '6px',
+                                      border: '1px solid #cbd5e1',
+                                      background: '#f8fafc',
+                                      color: '#475569',
+                                      fontSize: '11px',
+                                      fontWeight: '700',
+                                      cursor: 'pointer'
+                                    }}
+                                  >
+                                    Đóng lại ✕
+                                  </button>
+                                </div>
+
+                                {sessWeakest && (
+                                  <div style={{
+                                    background: '#fef2f2',
+                                    border: '1px solid #fecaca',
+                                    borderRadius: '8px',
+                                    padding: '12px 14px',
+                                    marginBottom: '12px'
+                                  }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px', marginBottom: '4px' }}>
+                                      <div style={{ fontSize: '13px', fontWeight: '800', color: '#b91c1c', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                        <Zap size={15} />
+                                        ĐIỂM YẾU NHẤT CỦA PHIÊN NÀY: {getMetricPlainLabel(sessWeakest)} (Đạt {sessWeakest.achievement_pct}% mục tiêu)
+                                      </div>
+                                      <span style={{ fontSize: '11px', fontWeight: '700', background: '#fee2e2', color: '#991b1b', padding: '2px 8px', borderRadius: '4px' }}>
+                                        Bộ phận xử lý: {sessWeakest.owner_departments}
+                                      </span>
+                                    </div>
+                                    <div style={{ fontSize: '12px', color: '#7f1d1d', marginBottom: '6px' }}>
+                                      <strong>Nguyên nhân:</strong> {sessWeakest.root_cause}
+                                    </div>
+                                    {(sessWeakest.prescriptions || []).map((p, idx) => (
+                                      <div key={idx} style={{ fontSize: '12px', color: '#1e293b', display: 'flex', gap: '6px', marginTop: '2px' }}>
+                                        <span style={{ fontWeight: '700', color: '#b91c1c', minWidth: '86px' }}>[{p.dept}]</span>
+                                        <span>{p.action}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+
+                                <div style={{ overflowX: 'auto' }}>
+                                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                                    <thead>
+                                      <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#475569', textAlign: 'left' }}>
+                                        <th style={{ padding: '7px 10px' }}>8 Chỉ số phiên Live</th>
+                                        <th style={{ padding: '7px 10px' }}>Thực tế phiên này</th>
+                                        <th style={{ padding: '7px 10px' }}>Mục tiêu chuẩn</th>
+                                        <th style={{ padding: '7px 10px' }}>Đánh giá</th>
+                                        <th style={{ padding: '7px 10px' }}>Bộ phận</th>
+                                        <th style={{ padding: '7px 10px' }}>Đề xuất tối ưu</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {sessMetrics.map((m) => {
+                                        const isW = sessWeakest?.key === m.key;
+                                        return (
+                                          <tr key={m.key} style={{ borderBottom: '1px solid #f1f5f9', background: isW ? '#fff1f2' : 'transparent' }}>
+                                            <td style={{ padding: '7px 10px', fontWeight: '700', color: '#0f172a' }}>
+                                              {getMetricPlainLabel(m)}
+                                              {isW && (
+                                                <span style={{ marginLeft: '5px', fontSize: '10px', background: '#dc2626', color: '#fff', padding: '1px 5px', borderRadius: '4px' }}>
+                                                  YẾU NHẤT
+                                                </span>
+                                              )}
+                                            </td>
+                                            <td style={{ padding: '7px 10px', fontWeight: '700', color: m.actual === null ? '#94a3b8' : '#0f172a' }}>
+                                              {formatMetricVal(m)}
+                                            </td>
+                                            <td style={{ padding: '7px 10px', color: '#475569' }}>{m.target_display}</td>
+                                            <td style={{ padding: '7px 10px' }}>
+                                              {m.status === 'NO_DATA' && (
+                                                <span style={{ background: '#f1f5f9', color: '#64748b', padding: '2px 7px', borderRadius: '4px', fontWeight: '600', fontSize: '11px' }}>Chưa có</span>
+                                              )}
+                                              {m.status === 'PASS' && (
+                                                <span style={{ background: '#dcfce7', color: '#15803d', padding: '2px 7px', borderRadius: '4px', fontWeight: '700', fontSize: '11px' }}>✓ Đạt</span>
+                                              )}
+                                              {m.status === 'NEEDS_ACTION' && (
+                                                <span style={{ background: '#fef3c7', color: '#b45309', padding: '2px 7px', borderRadius: '4px', fontWeight: '700', fontSize: '11px' }}>⚠ Chưa đạt</span>
+                                              )}
+                                            </td>
+                                            <td style={{ padding: '7px 10px', fontWeight: '600', color: '#334155' }}>{m.owner_departments}</td>
+                                            <td style={{ padding: '7px 10px', color: '#475569', maxWidth: '300px' }}>
+                                              {m.status === 'PASS' ? 'Duy trì hiệu suất tốt.' : m.prescriptions?.[0]?.action}
+                                            </td>
+                                          </tr>
+                                        );
+                                      })}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                        </React.Fragment>
                       );
                     })}
                   </tbody>
