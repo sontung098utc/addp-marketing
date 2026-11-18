@@ -1100,7 +1100,7 @@ export default function CommerceSopCommandCenterView({
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
-              <span style={{ color: '#475569', fontWeight: '600' }}>Doanh số từ Video</span>
+              <span style={{ color: '#475569', fontWeight: '600' }}>Doanh số thực từ Video (sau hủy/hoàn)</span>
               <span style={{ fontWeight: '700', color: '#7c3aed', background: '#f5f3ff', padding: '2px 7px', borderRadius: '6px', whiteSpace: 'nowrap' }}>
                 {video.gmv_pacing_pct || 0}%
               </span>
@@ -1110,6 +1110,11 @@ export default function CommerceSopCommandCenterView({
               <span style={{ fontSize: '12px', color: '#64748b', whiteSpace: 'nowrap' }}>/ {formatVND(video.target_gmv)}</span>
             </div>
             <ProgressBar pct={video.gmv_pacing_pct} color="#7c3aed" height={8} />
+            {(video.gross_gmv > 0 && video.gross_gmv > video.actual_gmv) && (
+              <div style={{ fontSize: '11px', color: '#64748b' }}>
+                Doanh số gộp: <strong>{formatVND(video.gross_gmv)}</strong> • Hủy/hoàn ({video.loss_rate_pct || 0}%): <strong style={{ color: '#dc2626' }}>-{formatVND(video.loss_amount || 0)}</strong>
+              </div>
+            )}
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -1162,7 +1167,7 @@ export default function CommerceSopCommandCenterView({
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
-              <span style={{ color: '#475569', fontWeight: '600' }}>Doanh số Livestream</span>
+              <span style={{ color: '#475569', fontWeight: '600' }}>Doanh số thực Livestream (sau hủy/hoàn)</span>
               <span style={{ fontWeight: '700', color: '#e11d48', background: '#fff1f2', padding: '2px 7px', borderRadius: '6px', whiteSpace: 'nowrap' }}>
                 {live.gmv_pacing_pct || 0}%
               </span>
@@ -1172,6 +1177,11 @@ export default function CommerceSopCommandCenterView({
               <span style={{ fontSize: '12px', color: '#64748b', whiteSpace: 'nowrap' }}>/ {formatVND(live.target_gmv)}</span>
             </div>
             <ProgressBar pct={live.gmv_pacing_pct} color="#e11d48" height={8} />
+            {(live.gross_gmv > 0 && live.gross_gmv > live.actual_gmv) && (
+              <div style={{ fontSize: '11px', color: '#64748b' }}>
+                Doanh số gộp: <strong>{formatVND(live.gross_gmv)}</strong> • Hủy/hoàn ({live.loss_rate_pct || 0}%): <strong style={{ color: '#dc2626' }}>-{formatVND(live.loss_amount || 0)}</strong>
+              </div>
+            )}
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>

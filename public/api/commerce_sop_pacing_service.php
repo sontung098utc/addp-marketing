@@ -468,21 +468,36 @@ class CommerceSopPacingService {
         $totalClicks = $adsData['total_clicks'];
         $totalImpressions = $adsData['total_impressions'];
 
-        // Shop ROI uses shop realized GMV / total ads spend (and ads_roi = ads_gmv / spend)
+        // Shop realized factor (1 - loss_rate) from real orders & loss ledger
+        $realizedFactor = ($totalShopGrossGmv > 0 && $totalShopGmv >= 0)
+            ? max(0.0, min(1.0, $totalShopGmv / $totalShopGrossGmv))
+            : 1.0;
+        $shopLossRatePct = round((1.0 - $realizedFactor) * 100.0, 2);
+
+        // Shop ROI uses shop realized GMV / total ads spend (and ads_roi = realized_ads_gmv / spend)
         $shopActualRoi = $totalSpend > 0 ? round($totalShopGmv / $totalSpend, 2) : null;
-        $adsActualRoi = $totalSpend > 0 ? round($totalAdsGmv / $totalSpend, 2) : null;
+        $adsGrossRoi = $totalSpend > 0 ? round($totalAdsGmv / $totalSpend, 2) : null;
+        $totalAdsRealizedGmv = round($totalAdsGmv * $realizedFactor, 2);
+        $adsActualRoi = $totalSpend > 0 ? round($totalAdsRealizedGmv / $totalSpend, 2) : null;
 
         $videoSpend = $hasRepAds ? (float)($repAdsProd['cost'] ?? $adsData['video_spend']) : $adsData['video_spend'];
-        $videoAdsGmv = $hasRepAds ? (float)($repAdsProd['attributed_gross_revenue'] ?? $adsData['video_ads_gmv']) : $adsData['video_ads_gmv'];
+        $videoGrossGmv = $hasRepAds ? (float)($repAdsProd['attributed_gross_revenue'] ?? $adsData['video_ads_gmv']) : $adsData['video_ads_gmv'];
+        $videoAdsGmv = round($videoGrossGmv * $realizedFactor, 2);
+        $videoLossAmount = round($videoGrossGmv - $videoAdsGmv, 2);
         $videoOrders = $hasRepAds ? (int)($repAdsProd['orders'] ?? $adsData['video_orders']) : $adsData['video_orders'];
         $videoClicks = $adsData['video_clicks'];
         $videoRoi = $videoSpend > 0 ? round($videoAdsGmv / $videoSpend, 2) : null;
+        $videoGrossRoi = $videoSpend > 0 ? round($videoGrossGmv / $videoSpend, 2) : null;
 
         $liveSpend = $hasRepAds ? (float)($repAdsLive['cost'] ?? $adsData['live_spend']) : $adsData['live_spend'];
-        $liveAdsGmv = $hasRepAds ? (float)($repAdsLive['attributed_gross_revenue'] ?? $adsData['live_ads_gmv']) : $adsData['live_ads_gmv'];
+        $liveAdsGrossGmv = $hasRepAds ? (float)($repAdsLive['attributed_gross_revenue'] ?? $adsData['live_ads_gmv']) : $adsData['live_ads_gmv'];
         $liveSessionGmv = $liveSessions['total_gmv'];
-        $liveEffectiveGmv = $liveAdsGmv > 0 ? $liveAdsGmv : $liveSessionGmv;
-        $liveRoi = $liveSpend > 0 ? round($liveAdsGmv / $liveSpend, 2) : null;
+        $liveGrossGmv = $liveAdsGrossGmv > 0 ? $liveAdsGrossGmv : $liveSessionGmv;
+        $liveEffectiveGmv = round($liveGrossGmv * $realizedFactor, 2);
+        $liveLossAmount = round($liveGrossGmv - $liveEffectiveGmv, 2);
+        $liveAdsGmv = round($liveAdsGrossGmv * $realizedFactor, 2);
+        $liveRoi = $liveSpend > 0 ? round($liveEffectiveGmv / $liveSpend, 2) : null;
+        $liveGrossRoi = $liveSpend > 0 ? round($liveGrossGmv / $liveSpend, 2) : null;
         $liveBlendedRoi = $liveSpend > 0 ? round($liveEffectiveGmv / $liveSpend, 2) : null;
 
         $liveSessionCount = (int)$liveSessions['session_count'];
@@ -639,9 +654,13 @@ class CommerceSopPacingService {
                     'daily_spend_cap' => $periodVideoSpendCap,
                     'spend_pacing_pct' => $videoSpendCapPct,
                     'actual_gmv' => round($videoAdsGmv, 2),
+                    'gross_gmv' => round($videoGrossGmv, 2),
+                    'loss_amount' => round($videoLossAmount, 2),
+                    'loss_rate_pct' => $shopLossRatePct,
                     'target_gmv' => $periodVideoGmvTarget,
                     'gmv_pacing_pct' => $videoGmvPacingPct,
                     'actual_roi' => $videoRoi,
+                    'gross_roi' => $videoGrossRoi,
                     'target_roi' => $config['video_target_roi'],
                     'orders' => $videoOrders,
                     'clicks' => $videoClicks,
@@ -671,11 +690,15 @@ class CommerceSopPacingService {
                     'daily_spend_cap' => $periodLiveSpendCap,
                     'spend_pacing_pct' => $liveSpendCapPct,
                     'actual_gmv' => round($liveEffectiveGmv, 2),
+                    'gross_gmv' => round($liveGrossGmv, 2),
+                    'loss_amount' => round($liveLossAmount, 2),
+                    'loss_rate_pct' => $shopLossRatePct,
                     'ads_gmv' => round($liveAdsGmv, 2),
                     'session_gmv' => round($liveSessionGmv, 2),
                     'target_gmv' => $periodLiveGmvTarget,
                     'gmv_pacing_pct' => $liveGmvPacingPct,
                     'actual_roi' => $liveRoi,
+                    'gross_roi' => $liveGrossRoi,
                     'blended_roi' => $liveBlendedRoi,
                     'target_roi' => $config['live_target_roi'],
                     'sessions_today' => $liveSessionCount,
