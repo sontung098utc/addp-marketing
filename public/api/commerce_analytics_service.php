@@ -433,7 +433,8 @@ class CommerceAnalyticsService {
             "ALTER TABLE `commerce_live_sessions` ADD COLUMN `unique_viewers` INT UNSIGNED NOT NULL DEFAULT 0 AFTER `total_views`",
             "ALTER TABLE `commerce_live_sessions` ADD COLUMN `avg_watch_time_sec` INT UNSIGNED NOT NULL DEFAULT 0 AFTER `duration_seconds`",
             "ALTER TABLE `commerce_live_sessions` ADD COLUMN `views_over_1min` INT UNSIGNED NOT NULL DEFAULT 0 AFTER `unique_viewers`",
-            "ALTER TABLE `commerce_live_sessions` ADD COLUMN `enter_room_rate_pct` DECIMAL(8,2) NULL DEFAULT NULL AFTER `clicks`",
+            "ALTER TABLE `commerce_live_sessions` ADD COLUMN `preview_ctr_pct` DECIMAL(8,2) NULL DEFAULT NULL AFTER `clicks`",
+            "ALTER TABLE `commerce_live_sessions` ADD COLUMN `enter_room_rate_pct` DECIMAL(8,2) NULL DEFAULT NULL AFTER `preview_ctr_pct`",
             "ALTER TABLE `commerce_live_sessions` ADD COLUMN `ctr_live_pct` DECIMAL(8,2) NULL DEFAULT NULL AFTER `enter_room_rate_pct`",
             "ALTER TABLE `commerce_live_sessions` ADD COLUMN `sku_order_rate_pct` DECIMAL(8,2) NULL DEFAULT NULL AFTER `ctr_live_pct`",
             "ALTER TABLE `commerce_live_sessions` ADD COLUMN `comment_rate_pct` DECIMAL(8,2) NULL DEFAULT NULL AFTER `comments_count`",
@@ -442,6 +443,7 @@ class CommerceAnalyticsService {
             "ALTER TABLE `commerce_live_sessions` ADD COLUMN `like_rate_pct` DECIMAL(10,2) NULL DEFAULT NULL AFTER `share_rate_pct`",
             "ALTER TABLE `commerce_live_sessions` ADD COLUMN `gpm` DECIMAL(15,2) NULL DEFAULT NULL AFTER `gmv`",
             "ALTER TABLE `commerce_live_sessions` ADD COLUMN `ad_spend` DECIMAL(15,2) NULL DEFAULT NULL AFTER `gpm`",
+            "ALTER TABLE `commerce_live_sessions` ADD COLUMN `data_source` VARCHAR(64) NULL DEFAULT NULL AFTER `currency`",
             "ALTER TABLE `commerce_live_sessions` ADD COLUMN `raw_json` MEDIUMTEXT NULL DEFAULT NULL AFTER `raw_data_hash`"
         ];
 
@@ -455,218 +457,117 @@ class CommerceAnalyticsService {
     }
 
     /**
-     * Seeds verified TikTok Shop Streamer Desktop & Live Workbench sessions for shop 7495657895504611503
-     * so the exact room_ids and metrics are present even before or alongside API sync.
+     * Purges any previously seeded estimated fields so ZERO fabricated metrics remain in commerce_live_sessions.
+     * Only real TikTok Shop API records (data_source = 'TIKTOK_SHOP_API') or verified user Live Workbench imports
+     * (data_source = 'LIVE_WORKBENCH_VERIFIED') are kept intact.
+     */
+    public function purgeEstimatedSeedSessions(string $shopId): void {
+        $this->ensureLiveSessionsColumns();
+        try {
+            // Remove rows created by the old unverified seed script (which had no data_source set)
+            $stmt = $this->db->prepare("DELETE FROM `commerce_live_sessions`
+                WHERE shop_id = ?
+                  AND (data_source IS NULL OR data_source = '' OR data_source = 'SEED_ESTIMATE')
+                  AND session_id IN (
+                      '7709349154191035188',
+                      '7709139193607965460',
+                      '7709048712449805057',
+                      '7708979016430684934',
+                      '7708768298952706837',
+                      '7708677717398473473'
+                  )");
+            $stmt->execute([$shopId]);
+        } catch (\Throwable $t) {}
+    }
+
+    /**
+     * Backward-compatible no-op stub: we NEVER fabricate/seed estimated LIVE metrics anymore.
+     * Instead, purge old estimated seeds if present.
      */
     public function seedVerifiedScreenshotLiveSessions(string $shopId): void {
-        if ($shopId !== '7495657895504611503' && $shopId !== '') {
-            return;
-        }
+        $this->purgeEstimatedSeedSessions($shopId);
+    }
+
+    /**
+     * Saves a user-verified LIVE session directly from TikTok Shop Live Workbench
+     * (exact metrics from Seller Center / Workbench, zero estimation).
+     */
+    public function saveManualLiveWorkbenchSession(string $shopId, array $payload): array {
         $this->ensureLiveSessionsColumns();
 
-        $verifiedSessions = [
-            // 18/11/2026 - Ca 1 (10:32:41 - 13:32:44, 3h0m3s) - Verified from Live Workbench screenshot
-            [
-                'session_id' => '7709349154191035188',
-                'title' => 'Livestream 18/11 (Ca Sáng)',
-                'creator_username' => 'duocphamaddp',
-                'start_time' => '2026-11-18 10:32:41',
-                'end_time' => '2026-11-18 13:32:44',
-                'duration_seconds' => 10803,
-                'avg_watch_time_sec' => 27,
-                'gmv' => 1137000.00,
-                'gpm' => 91200.00,
-                'ad_spend' => 234730.00,
-                'orders_count' => 14,
-                'units_sold' => 15,
-                'customer_count' => 14,
-                'impressions' => 12470,
-                'total_views' => 425,
-                'unique_viewers' => 351,
-                'views_over_1min' => 23,
-                'clicks' => 68, // 16% CTR of 425 views
-                'enter_room_rate_pct' => 3.41,
-                'ctr_live_pct' => 16.00,
-                'sku_order_rate_pct' => 3.29,
-                'comments_count' => 21,
-                'comment_rate_pct' => 5.02,
-                'follows_count' => 1,
-                'follow_rate_pct' => 0.24,
-                'shares_count' => 0,
-                'share_rate_pct' => 0.00,
-                'like_rate_pct' => 630.38,
-            ],
-            // 17/11/2026 - Ca 3 (20:58 - 22:58, 2h0min) - Verified from Streamer Desktop screenshot
-            [
-                'session_id' => '7709139193607965460',
-                'title' => 'Livestream 17/11 (Ca Tối)',
-                'creator_username' => 'duocphamaddp',
-                'start_time' => '2026-11-17 20:58:00',
-                'end_time' => '2026-11-17 22:58:00',
-                'duration_seconds' => 7200,
-                'avg_watch_time_sec' => 25,
-                'gmv' => 364400.00,
-                'gpm' => 55975.00,
-                'ad_spend' => null,
-                'orders_count' => 6,
-                'units_sold' => 6,
-                'customer_count' => 6,
-                'impressions' => 6510,
-                'total_views' => 389,
-                'unique_viewers' => 320,
-                'views_over_1min' => 18,
-                'clicks' => 58,
-                'enter_room_rate_pct' => 5.98,
-                'ctr_live_pct' => 14.91,
-                'sku_order_rate_pct' => 1.54,
-                'comments_count' => 16,
-                'comment_rate_pct' => 4.11,
-                'follows_count' => 1,
-                'follow_rate_pct' => 0.26,
-                'shares_count' => 0,
-                'share_rate_pct' => 0.00,
-                'like_rate_pct' => null,
-            ],
-            // 17/11/2026 - Ca 2 (15:06 - 18:06, 3h0min) - Verified from Streamer Desktop screenshot
-            [
-                'session_id' => '7709048712449805057',
-                'title' => 'Livestream 17/11 (Ca Chiều)',
-                'creator_username' => 'duocphamaddp',
-                'start_time' => '2026-11-17 15:06:00',
-                'end_time' => '2026-11-17 18:06:00',
-                'duration_seconds' => 10800,
-                'avg_watch_time_sec' => 28,
-                'gmv' => 821100.00,
-                'gpm' => 61368.00,
-                'ad_spend' => null,
-                'orders_count' => 12,
-                'units_sold' => 13,
-                'customer_count' => 12,
-                'impressions' => 13380,
-                'total_views' => 364,
-                'unique_viewers' => 305,
-                'views_over_1min' => 21,
-                'clicks' => 62,
-                'enter_room_rate_pct' => 2.72,
-                'ctr_live_pct' => 17.03,
-                'sku_order_rate_pct' => 3.30,
-                'comments_count' => 18,
-                'comment_rate_pct' => 4.95,
-                'follows_count' => 1,
-                'follow_rate_pct' => 0.27,
-                'shares_count' => 0,
-                'share_rate_pct' => 0.00,
-                'like_rate_pct' => null,
-            ],
-            // 17/11/2026 - Ca 1 (10:36 - 13:30, 2h54min) - Verified from Streamer Desktop screenshot
-            [
-                'session_id' => '7708979016430684934',
-                'title' => 'Livestream 17/11 (Ca Sáng)',
-                'creator_username' => 'duocphamaddp',
-                'start_time' => '2026-11-17 10:36:00',
-                'end_time' => '2026-11-17 13:30:00',
-                'duration_seconds' => 10440,
-                'avg_watch_time_sec' => 26,
-                'gmv' => 531100.00,
-                'gpm' => 41525.00,
-                'ad_spend' => null,
-                'orders_count' => 9,
-                'units_sold' => 9,
-                'customer_count' => 9,
-                'impressions' => 12790,
-                'total_views' => 484,
-                'unique_viewers' => 402,
-                'views_over_1min' => 24,
-                'clicks' => 72,
-                'enter_room_rate_pct' => 3.78,
-                'ctr_live_pct' => 14.88,
-                'sku_order_rate_pct' => 1.86,
-                'comments_count' => 22,
-                'comment_rate_pct' => 4.55,
-                'follows_count' => 2,
-                'follow_rate_pct' => 0.41,
-                'shares_count' => 0,
-                'share_rate_pct' => 0.00,
-                'like_rate_pct' => null,
-            ],
-            // 16/11/2026 - Ca 3 (20:58 - 22:58, 2h0min) - Verified from Streamer Desktop screenshot
-            [
-                'session_id' => '7708768298952706837',
-                'title' => 'Livestream 16/11 (Ca Tối)',
-                'creator_username' => 'duocphamaddp',
-                'start_time' => '2026-11-16 20:58:00',
-                'end_time' => '2026-11-16 22:58:00',
-                'duration_seconds' => 7200,
-                'avg_watch_time_sec' => 25,
-                'gmv' => 399700.00,
-                'gpm' => 60745.00,
-                'ad_spend' => null,
-                'orders_count' => 5,
-                'units_sold' => 5,
-                'customer_count' => 5,
-                'impressions' => 6580,
-                'total_views' => 389,
-                'unique_viewers' => 318,
-                'views_over_1min' => 19,
-                'clicks' => 55,
-                'enter_room_rate_pct' => 5.91,
-                'ctr_live_pct' => 14.14,
-                'sku_order_rate_pct' => 1.29,
-                'comments_count' => 15,
-                'comment_rate_pct' => 3.86,
-                'follows_count' => 1,
-                'follow_rate_pct' => 0.26,
-                'shares_count' => 0,
-                'share_rate_pct' => 0.00,
-                'like_rate_pct' => null,
-            ],
-            // 16/11/2026 - Ca 2 (15:07 - 18:20, 3h13min) - Verified from Streamer Desktop screenshot
-            [
-                'session_id' => '7708677717398473473',
-                'title' => 'Livestream 16/11 (Ca Chiều)',
-                'creator_username' => 'duocphamaddp',
-                'start_time' => '2026-11-16 15:07:00',
-                'end_time' => '2026-11-16 18:20:00',
-                'duration_seconds' => 11580,
-                'avg_watch_time_sec' => 29,
-                'gmv' => 1200000.00,
-                'gpm' => 89753.00,
-                'ad_spend' => null,
-                'orders_count' => 18,
-                'units_sold' => 19,
-                'customer_count' => 18,
-                'impressions' => 13370,
-                'total_views' => 389,
-                'unique_viewers' => 332,
-                'views_over_1min' => 26,
-                'clicks' => 70,
-                'enter_room_rate_pct' => 2.91,
-                'ctr_live_pct' => 17.99,
-                'sku_order_rate_pct' => 4.63,
-                'comments_count' => 20,
-                'comment_rate_pct' => 5.14,
-                'follows_count' => 2,
-                'follow_rate_pct' => 0.51,
-                'shares_count' => 0,
-                'share_rate_pct' => 0.00,
-                'like_rate_pct' => null,
-            ],
+        $sessionId = trim((string)($payload['session_id'] ?? ''));
+        if ($sessionId === '') {
+            $sessionId = 'WB-' . date('YmdHis');
+        }
+        $startTime = trim((string)($payload['start_time'] ?? date('Y-m-d H:i:s')));
+        if (strlen($startTime) === 16) {
+            $startTime .= ':00';
+        }
+        $durationMinutes = isset($payload['duration_minutes']) && is_numeric($payload['duration_minutes'])
+            ? (int)$payload['duration_minutes']
+            : 0;
+        $durationSeconds = isset($payload['duration_seconds']) && is_numeric($payload['duration_seconds'])
+            ? (int)$payload['duration_seconds']
+            : ($durationMinutes * 60);
+        $endTime = $durationSeconds > 0
+            ? date('Y-m-d H:i:s', strtotime($startTime) + $durationSeconds)
+            : null;
+
+        $toNullFloat = function ($v): ?float {
+            if ($v === null || $v === '') return null;
+            return (float)$v;
+        };
+        $toInt = function ($v): int {
+            if ($v === null || $v === '') return 0;
+            return (int)round((float)$v);
+        };
+
+        $record = [
+            'session_id' => $sessionId,
+            'title' => trim((string)($payload['title'] ?? '')),
+            'creator_username' => trim((string)($payload['creator_username'] ?? 'duocphamaddp')),
+            'start_time' => $startTime,
+            'end_time' => $endTime,
+            'duration_seconds' => $durationSeconds,
+            'avg_watch_time_sec' => $toInt($payload['avg_watch_time_sec'] ?? 0),
+            'gmv' => (float)($payload['gmv'] ?? 0),
+            'gpm' => $toNullFloat($payload['gpm'] ?? null),
+            'ad_spend' => $toNullFloat($payload['ad_spend'] ?? null),
+            'orders_count' => $toInt($payload['orders_count'] ?? $payload['units_sold'] ?? 0),
+            'units_sold' => $toInt($payload['units_sold'] ?? $payload['orders_count'] ?? 0),
+            'customer_count' => $toInt($payload['customer_count'] ?? $payload['orders_count'] ?? 0),
+            'impressions' => $toInt($payload['impressions'] ?? 0),
+            'total_views' => $toInt($payload['total_views'] ?? 0),
+            'unique_viewers' => $toInt($payload['unique_viewers'] ?? 0),
+            'views_over_1min' => $toInt($payload['views_over_1min'] ?? 0),
+            'preview_ctr_pct' => $toNullFloat($payload['preview_ctr_pct'] ?? null),
+            'enter_room_rate_pct' => $toNullFloat($payload['enter_room_rate_pct'] ?? null),
+            'ctr_live_pct' => $toNullFloat($payload['ctr_live_pct'] ?? null),
+            'sku_order_rate_pct' => $toNullFloat($payload['sku_order_rate_pct'] ?? null),
+            'comment_rate_pct' => $toNullFloat($payload['comment_rate_pct'] ?? null),
+            'follow_rate_pct' => $toNullFloat($payload['follow_rate_pct'] ?? null),
+            'share_rate_pct' => $toNullFloat($payload['share_rate_pct'] ?? null),
+            'like_rate_pct' => $toNullFloat($payload['like_rate_pct'] ?? null),
+            'data_source' => 'LIVE_WORKBENCH_VERIFIED',
         ];
 
-        foreach ($verifiedSessions as $vs) {
-            try {
-                $this->ingestLiveSessionRecord($shopId ?: '7495657895504611503', $vs);
-            } catch (\Throwable $t) {}
-        }
+        $this->ingestLiveSessionRecord($shopId, $record);
+
+        return [
+            'session_id' => $sessionId,
+            'data_source' => 'LIVE_WORKBENCH_VERIFIED',
+            'message' => 'Đã lưu chính xác số liệu Live Workbench cho phiên ' . $sessionId
+        ];
     }
 
     /**
      * Synchronizes Livestream Sessions Performance from TikTok Shop Analytics API
-     * Endpoint: GET /analytics/202605/shop_lives/performance (auto-probed across versions)
+     * Endpoint: GET /analytics/202609/shop_lives/performance (auto-probed across versions)
+     * ZERO FAKE DATA: Returns exact API count or exact API error message.
      */
     public function syncShopLivesAnalytics(string $shopId, string $startDate, string $endDate, array $options = []): array {
         $this->ensureLiveSessionsColumns();
-        $this->seedVerifiedScreenshotLiveSessions($shopId);
+        $this->purgeEstimatedSeedSessions($shopId);
 
         // Allow querying up to today + 1 day (since end_date_lt is exclusive) so today's finished sessions are included
         $effectiveStart = $startDate;
@@ -679,9 +580,9 @@ class CommerceAnalyticsService {
         $accessToken = getAccessToken($shopId);
         if (!$accessToken) {
             return [
-                'status' => 'PARTIAL_SEEDED',
+                'status' => 'FAILED',
                 'error' => 'TOKEN_NOT_FOUND',
-                'message' => 'Đã nạp phiên LIVE chuẩn; không tìm thấy TikTok Shop Access Token để gọi thêm API.',
+                'message' => 'Không tìm thấy TikTok Shop Access Token để gọi API Phiên LIVE. Vui lòng kết nối lại TikTok Shop.',
                 'records_ingested' => 0
             ];
         }
@@ -689,9 +590,9 @@ class CommerceAnalyticsService {
         $shopCipher = $this->resolveShopCipher($shopId, $accessToken);
         if (empty($shopCipher)) {
             return [
-                'status' => 'PARTIAL_SEEDED',
+                'status' => 'FAILED',
                 'error' => 'SHOP_CIPHER_NOT_FOUND',
-                'message' => 'Đã nạp phiên LIVE chuẩn; chưa xác thực được shop_cipher.',
+                'message' => 'Chưa xác thực được shop_cipher cho gian hàng.',
                 'records_ingested' => 0
             ];
         }
@@ -730,6 +631,7 @@ class CommerceAnalyticsService {
 
                 foreach ($liveList as $lData) {
                     if (is_array($lData)) {
+                        $lData['data_source'] = 'TIKTOK_SHOP_API';
                         $this->ingestLiveSessionRecord($shopId, $lData);
                         $recordsCount++;
                     }
@@ -741,11 +643,13 @@ class CommerceAnalyticsService {
             return [
                 'status' => 'COMPLETED',
                 'records_ingested' => $recordsCount,
-                'message' => "Đồng bộ thành công {$recordsCount} phiên LIVE từ TikTok Shop."
+                'message' => $recordsCount > 0
+                    ? "Đã đồng bộ chính xác {$recordsCount} phiên LIVE thực tế từ TikTok Shop API."
+                    : "TikTok Shop API trả về 0 phiên LIVE trong kỳ ({$effectiveStart} → {$effectiveEnd})."
             ];
         } catch (\Throwable $t) {
             return [
-                'status' => 'PARTIAL',
+                'status' => 'FAILED',
                 'error' => 'API_ERROR',
                 'message' => $t->getMessage(),
                 'records_ingested' => $recordsCount
@@ -842,6 +746,10 @@ class CommerceAnalyticsService {
             $clicks = (int)round($totalViews * ($ctrLivePct / 100.0));
         }
 
+        $previewCtrPct = isset($sessionData['preview_ctr_pct'])
+            ? (float)$sessionData['preview_ctr_pct']
+            : $extractPct($traffic['preview_ctr'] ?? $traffic['live_preview_ctr'] ?? null);
+
         $enterRoomRatePct = isset($sessionData['enter_room_rate_pct'])
             ? (float)$sessionData['enter_room_rate_pct']
             : $extractPct($traffic['enter_room_rate'] ?? $traffic['click_rate'] ?? ($impressions > 0 ? (($totalViews / $impressions) * 100.0) : null));
@@ -886,6 +794,7 @@ class CommerceAnalyticsService {
             : (isset($sales['ad_spend']) ? $extractMoney($sales['ad_spend']) : null);
 
         $currency = strtoupper(trim((string)($sessionData['currency'] ?? 'VND')));
+        $dataSource = trim((string)($sessionData['data_source'] ?? 'TIKTOK_SHOP_API'));
         $rawJson = json_encode($sessionData, JSON_UNESCAPED_UNICODE);
         $rawHash = hash('sha256', (string)$rawJson);
 
@@ -895,10 +804,10 @@ class CommerceAnalyticsService {
             duration_seconds, avg_watch_time_sec, gmv, gpm, ad_spend,
             orders_count, units_sold, customer_count,
             total_views, unique_viewers, views_over_1min, impressions, clicks,
-            enter_room_rate_pct, ctr_live_pct, sku_order_rate_pct,
+            preview_ctr_pct, enter_room_rate_pct, ctr_live_pct, sku_order_rate_pct,
             peak_concurrent_users,
             comments_count, comment_rate_pct, shares_count, share_rate_pct,
-            follows_count, follow_rate_pct, like_rate_pct, currency,
+            follows_count, follow_rate_pct, like_rate_pct, currency, data_source,
             raw_data_hash, raw_json, created_at, updated_at
         ) VALUES (
             ?, ?, ?, ?, ?,
@@ -906,10 +815,10 @@ class CommerceAnalyticsService {
             ?, ?, ?, ?, ?,
             ?, ?, ?,
             ?, ?, ?, ?, ?,
-            ?, ?, ?,
+            ?, ?, ?, ?,
             ?,
             ?, ?, ?, ?,
-            ?, ?, ?, ?,
+            ?, ?, ?, ?, ?,
             ?, ?, NOW(), NOW()
         ) ON DUPLICATE KEY UPDATE
             title = VALUES(title),
@@ -920,29 +829,31 @@ class CommerceAnalyticsService {
             end_time = COALESCE(VALUES(end_time), end_time),
             duration_seconds = IF(VALUES(duration_seconds) > 0, VALUES(duration_seconds), duration_seconds),
             avg_watch_time_sec = IF(VALUES(avg_watch_time_sec) > 0, VALUES(avg_watch_time_sec), avg_watch_time_sec),
-            gmv = VALUES(gmv),
+            gmv = IF(VALUES(gmv) > 0, VALUES(gmv), gmv),
             gpm = COALESCE(VALUES(gpm), gpm),
             ad_spend = COALESCE(VALUES(ad_spend), ad_spend),
-            orders_count = VALUES(orders_count),
-            units_sold = VALUES(units_sold),
-            customer_count = VALUES(customer_count),
-            total_views = VALUES(total_views),
+            orders_count = IF(VALUES(orders_count) > 0, VALUES(orders_count), orders_count),
+            units_sold = IF(VALUES(units_sold) > 0, VALUES(units_sold), units_sold),
+            customer_count = IF(VALUES(customer_count) > 0, VALUES(customer_count), customer_count),
+            total_views = IF(VALUES(total_views) > 0, VALUES(total_views), total_views),
             unique_viewers = IF(VALUES(unique_viewers) > 0, VALUES(unique_viewers), unique_viewers),
             views_over_1min = IF(VALUES(views_over_1min) > 0, VALUES(views_over_1min), views_over_1min),
-            impressions = VALUES(impressions),
-            clicks = VALUES(clicks),
+            impressions = IF(VALUES(impressions) > 0, VALUES(impressions), impressions),
+            clicks = IF(VALUES(clicks) > 0, VALUES(clicks), clicks),
+            preview_ctr_pct = COALESCE(VALUES(preview_ctr_pct), preview_ctr_pct),
             enter_room_rate_pct = COALESCE(VALUES(enter_room_rate_pct), enter_room_rate_pct),
             ctr_live_pct = COALESCE(VALUES(ctr_live_pct), ctr_live_pct),
             sku_order_rate_pct = COALESCE(VALUES(sku_order_rate_pct), sku_order_rate_pct),
             peak_concurrent_users = IF(VALUES(peak_concurrent_users) > 0, VALUES(peak_concurrent_users), peak_concurrent_users),
-            comments_count = VALUES(comments_count),
+            comments_count = IF(VALUES(comments_count) > 0, VALUES(comments_count), comments_count),
             comment_rate_pct = COALESCE(VALUES(comment_rate_pct), comment_rate_pct),
-            shares_count = VALUES(shares_count),
+            shares_count = IF(VALUES(shares_count) > 0, VALUES(shares_count), shares_count),
             share_rate_pct = COALESCE(VALUES(share_rate_pct), share_rate_pct),
-            follows_count = VALUES(follows_count),
+            follows_count = IF(VALUES(follows_count) > 0, VALUES(follows_count), follows_count),
             follow_rate_pct = COALESCE(VALUES(follow_rate_pct), follow_rate_pct),
             like_rate_pct = COALESCE(VALUES(like_rate_pct), like_rate_pct),
             currency = VALUES(currency),
+            data_source = IF(data_source = 'LIVE_WORKBENCH_VERIFIED' AND VALUES(data_source) = 'TIKTOK_SHOP_API', 'LIVE_WORKBENCH_VERIFIED', VALUES(data_source)),
             raw_data_hash = VALUES(raw_data_hash),
             raw_json = VALUES(raw_json),
             updated_at = NOW()");
@@ -970,6 +881,7 @@ class CommerceAnalyticsService {
             $viewsOver1Min,
             $impressions,
             $clicks,
+            $previewCtrPct,
             $enterRoomRatePct,
             $ctrLivePct,
             $skuOrderRatePct,
@@ -982,6 +894,7 @@ class CommerceAnalyticsService {
             $followRatePct,
             $likeRatePct,
             $currency,
+            $dataSource,
             $rawHash,
             $rawJson
         ]);

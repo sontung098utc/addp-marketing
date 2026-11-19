@@ -2494,6 +2494,24 @@ try {
             ], JSON_UNESCAPED_UNICODE);
             break;
 
+        case 'save_live_workbench_session':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                throw new InvalidArgumentException('Yêu cầu phương thức POST.');
+            }
+            $rawBody = file_get_contents('php://input');
+            $payload = json_decode((string)$rawBody, true);
+            if (!is_array($payload)) {
+                $payload = $_POST;
+            }
+            $targetShop = trim((string)($payload['shop_id'] ?? $shopId));
+            if ($targetShop === '') {
+                throw new InvalidArgumentException('Thiếu shop_id.');
+            }
+            $analyticsSvc = new CommerceAnalyticsService($db);
+            $saved = $analyticsSvc->saveManualLiveWorkbenchSession($targetShop, $payload);
+            jsonResponse(true, $saved, $saved['message'] ?? 'Đã lưu phiên LIVE thực tế.');
+            break;
+
         // =====================================================================
         // ACTION 23: LIVESTREAM ANALYTICS & GOLDEN HOUR ENGINE
         // =====================================================================
@@ -2501,7 +2519,7 @@ try {
             try {
                 $analyticsSvc = new CommerceAnalyticsService($db);
                 $analyticsSvc->ensureLiveSessionsColumns();
-                $analyticsSvc->seedVerifiedScreenshotLiveSessions($shopId);
+                $analyticsSvc->purgeEstimatedSeedSessions($shopId);
             } catch (\Throwable $t) {}
 
             $stmtLives = $db->prepare("SELECT 

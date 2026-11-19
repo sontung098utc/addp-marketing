@@ -64,6 +64,56 @@ export default function CommerceLiveAnalyticsView({
   const [showInactiveSessions, setShowInactiveSessions] = useState(false);
   const [showInactiveLiveCampaigns, setShowInactiveLiveCampaigns] = useState(false);
 
+  // Live Workbench Verified Input Modal
+  const [showWorkbenchModal, setShowWorkbenchModal] = useState(false);
+  const [wbSaving, setWbSaving] = useState(false);
+  const [wbForm, setWbForm] = useState({
+    session_id: '',
+    title: '',
+    start_time: `${endDate || new Date().toISOString().slice(0, 10)} 10:30`,
+    duration_minutes: '180',
+    gmv: '',
+    ad_spend: '',
+    units_sold: '',
+    impressions: '',
+    total_views: '',
+    unique_viewers: '',
+    avg_watch_time_sec: '',
+    views_over_1min: '',
+    preview_ctr_pct: '',
+    enter_room_rate_pct: '',
+    ctr_live_pct: '',
+    sku_order_rate_pct: '',
+    comment_rate_pct: '',
+    follow_rate_pct: '',
+    share_rate_pct: '',
+    like_rate_pct: ''
+  });
+
+  const handleSaveWorkbench = async (e) => {
+    e.preventDefault();
+    setWbSaving(true);
+    setSyncStatus(null);
+    try {
+      const res = await apiRequest(
+        'commerce_dashboard.php?action=save_live_workbench_session',
+        'POST',
+        { ...wbForm, shop_id: shopId }
+      );
+      if (res && res.success) {
+        setSyncStatus({ type: 'success', message: res.message || 'Đã lưu số liệu thực tế từ Live Workbench!' });
+        setShowWorkbenchModal(false);
+        await fetchLiveAnalytics();
+      } else {
+        setSyncStatus({ type: 'error', message: res?.message || 'Không thể lưu phiên Live.' });
+      }
+    } catch (err) {
+      setSyncStatus({ type: 'error', message: err.message || 'Lỗi khi lưu phiên Live.' });
+    } finally {
+      setWbSaving(false);
+    }
+  };
+
   const fetchLiveAnalytics = useCallback(async (overrideParams = null) => {
     setIsLoading(true);
     setError(null);
@@ -433,6 +483,26 @@ export default function CommerceLiveAnalyticsView({
 
           <button
             type="button"
+            onClick={() => setShowWorkbenchModal((v) => !v)}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '7px 12px',
+              borderRadius: '6px',
+              border: '1px solid #7c3aed',
+              background: showWorkbenchModal ? '#7c3aed' : '#f5f3ff',
+              fontSize: '12px',
+              fontWeight: '700',
+              color: showWorkbenchModal ? '#ffffff' : '#6d28d9',
+              cursor: 'pointer'
+            }}
+          >
+            + Nhập / Đối soát Live Workbench
+          </button>
+
+          <button
+            type="button"
             onClick={() => setShowConfigPanel((v) => !v)}
             style={{
               display: 'inline-flex',
@@ -475,6 +545,197 @@ export default function CommerceLiveAnalyticsView({
           </button>
         </div>
       </div>
+
+      {/* Live Workbench Verified Data Entry Form */}
+      {showWorkbenchModal && (
+        <form onSubmit={handleSaveWorkbench} style={{
+          background: '#faf5ff',
+          border: '1px solid #ddd6fe',
+          borderRadius: '12px',
+          padding: '16px 20px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '12px'
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+            <div>
+              <div style={{ fontSize: '14px', fontWeight: '800', color: '#4c1d95' }}>
+                Nhập / Đối Soát Số Liệu Thực Tế Từ TikTok Shop Live Workbench
+              </div>
+              <div style={{ fontSize: '11px', color: '#6b21a8' }}>
+                Dùng khi TikTok Shop API không trả về các chỉ số sâu của Workbench (Thời lượng xem TB, Lượt xem &gt; 1 phút, Preview CTR, Chi phí QC từng phiên). 100% số liệu thật, không tự ước tính.
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowWorkbenchModal(false)}
+              style={{ padding: '4px 10px', borderRadius: '6px', border: '1px solid #c4b5fd', background: '#fff', color: '#6d28d9', fontSize: '11px', fontWeight: '700', cursor: 'pointer' }}
+            >
+              Đóng ✕
+            </button>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(165px, 1fr))', gap: '10px' }}>
+            {[
+              { k: 'session_id', label: 'Mã Room ID (TikTok)', placeholder: '7709349154191035188', type: 'text' },
+              { k: 'title', label: 'Tên phiên LIVE', placeholder: 'Ca Sáng 18/11', type: 'text' },
+              { k: 'start_time', label: 'Giờ bắt đầu (YYYY-MM-DD HH:MM)', placeholder: '2026-11-18 10:32', type: 'text' },
+              { k: 'duration_minutes', label: 'Thời lượng (phút)', placeholder: '180', type: 'number' },
+              { k: 'gmv', label: 'GMV ghi nhận (đ)', placeholder: '1147089', type: 'number' },
+              { k: 'ad_spend', label: 'Chi phí quảng cáo (đ)', placeholder: '249840', type: 'number' },
+              { k: 'units_sold', label: 'Số món bán ra', placeholder: '16', type: 'number' },
+              { k: 'impressions', label: 'Lượt hiển thị', placeholder: '12570', type: 'number' },
+              { k: 'total_views', label: 'Lượt xem', placeholder: '425', type: 'number' },
+              { k: 'unique_viewers', label: 'Người xem (Unique)', placeholder: '351', type: 'number' },
+              { k: 'avg_watch_time_sec', label: 'Thời lượng xem TB (giây)', placeholder: '62', type: 'number' },
+              { k: 'views_over_1min', label: 'Lượt xem > 1 phút', placeholder: '58', type: 'number' },
+              { k: 'preview_ctr_pct', label: 'Preview CTR (%)', placeholder: '1.82', type: 'number', step: '0.01' },
+              { k: 'enter_room_rate_pct', label: 'Tỷ lệ nhấn vào phòng (%)', placeholder: '3.24', type: 'number', step: '0.01' },
+              { k: 'ctr_live_pct', label: 'CTR của LIVE (%)', placeholder: '29.09', type: 'number', step: '0.01' },
+              { k: 'sku_order_rate_pct', label: 'Tỷ lệ đặt hàng SKU (%)', placeholder: '5.00', type: 'number', step: '0.01' },
+              { k: 'comment_rate_pct', label: 'Tỷ lệ bình luận (%)', placeholder: '63.47', type: 'number', step: '0.01' },
+              { k: 'follow_rate_pct', label: 'Tỷ lệ theo dõi (%)', placeholder: '0.67', type: 'number', step: '0.01' },
+              { k: 'share_rate_pct', label: 'Tỷ lệ chia sẻ (%)', placeholder: '1.78', type: 'number', step: '0.01' },
+              { k: 'like_rate_pct', label: 'Tỷ lệ thích (%)', placeholder: '1975.28', type: 'number', step: '0.01' }
+            ].map((f) => (
+              <div key={f.k}>
+                <label style={{ display: 'block', fontSize: '11px', fontWeight: '700', color: '#4c1d95', marginBottom: '3px' }}>{f.label}</label>
+                <input
+                  type={f.type}
+                  step={f.step || 'any'}
+                  placeholder={f.placeholder}
+                  value={wbForm[f.k]}
+                  onChange={(e) => setWbForm((prev) => ({ ...prev, [f.k]: e.target.value }))}
+                  style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid #c4b5fd', fontSize: '12px', boxSizing: 'border-box', background: '#fff' }}
+                />
+              </div>
+            ))}
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+            <button
+              type="submit"
+              disabled={wbSaving}
+              style={{
+                padding: '8px 16px',
+                borderRadius: '6px',
+                border: 'none',
+                background: '#6d28d9',
+                color: '#ffffff',
+                fontSize: '12px',
+                fontWeight: '700',
+                cursor: wbSaving ? 'not-allowed' : 'pointer'
+              }}
+            >
+              {wbSaving ? 'Đang lưu...' : 'Lưu số liệu thực tế & Chẩn đoán 8 chỉ số ngay'}
+            </button>
+          </div>
+        </form>
+      )}
+
+      {/* Transparent API Diagnostic Banner (if TikTok Shop LIVE API returned an error) */}
+      {sopData?.api_sync_diagnostic?.status === 'FAILED' && (
+        <div style={{
+          background: '#fffbeb',
+          border: '1px solid #fcd34d',
+          borderRadius: '10px',
+          padding: '10px 16px',
+          fontSize: '12px',
+          color: '#92400e',
+          display: 'flex',
+          alignItems: 'flex-start',
+          gap: '8px'
+        }}>
+          <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: '2px' }} />
+          <div>
+            <strong>Thông báo từ TikTok Shop LIVE Analytics API:</strong> {sopData.api_sync_diagnostic.message}
+            <div style={{ marginTop: '2px', color: '#78350f' }}>
+              Hệ thống cam kết <strong>không tự bịa số liệu ước tính</strong>. Bạn có thể cấp lại quyền <code>data.shop_analytics.public.read</code> trên TikTok Shop Partner Center hoặc bấm <strong>&ldquo;+ Nhập / Đối soát Live Workbench&rdquo;</strong> ở trên để nạp chính xác 16 chỉ số của từng ca Live.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Executive Live Comparison & Root-Cause Diagnosis Report */}
+      {sopData?.executive_report && (
+        <div style={{
+          background: 'linear-gradient(135deg, #f8fafc 0%, #eff6ff 100%)',
+          border: '1px solid #bfdbfe',
+          borderRadius: '12px',
+          padding: '18px 20px',
+          boxShadow: '0 2px 6px rgba(37,99,235,0.06)'
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '10px' }}>
+            <div style={{ fontSize: '15px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Award size={18} color="#2563eb" />
+              {sopData.executive_report.headline}
+            </div>
+            {sopData.executive_report.has_real_sessions && (
+              <span style={{ fontSize: '11px', fontWeight: '700', background: '#dcfce7', color: '#15803d', padding: '3px 9px', borderRadius: '999px' }}>
+                100% Số liệu thực tế từ Sàn / Live Workbench
+              </span>
+            )}
+          </div>
+
+          {Array.isArray(sopData.executive_report.summary_points) && sopData.executive_report.summary_points.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '12px' }}>
+              {sopData.executive_report.summary_points.map((pt, i) => (
+                <div key={i} style={{ fontSize: '12px', color: '#1e293b', lineHeight: '1.5' }}>• {pt}</div>
+              ))}
+            </div>
+          )}
+
+          {Array.isArray(sopData.executive_report.session_diagnoses) && sopData.executive_report.session_diagnoses.length > 0 && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '12px', marginBottom: '12px' }}>
+              {sopData.executive_report.session_diagnoses.slice(0, 6).map((sd) => (
+                <div key={sd.session_id} style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '12px 14px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                    <div style={{ fontWeight: '800', fontSize: '13px', color: '#0f172a' }}>
+                      {sd.slot_label} — {sd.title}
+                    </div>
+                    <span style={{ fontSize: '10px', fontWeight: '700', padding: '2px 6px', borderRadius: '4px', background: sd.data_source === 'LIVE_WORKBENCH_VERIFIED' ? '#f3e8ff' : '#e0f2fe', color: sd.data_source === 'LIVE_WORKBENCH_VERIFIED' ? '#6d28d9' : '#0369a1' }}>
+                      {sd.data_source === 'LIVE_WORKBENCH_VERIFIED' ? 'Workbench' : 'TikTok API'}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#475569', marginBottom: '8px' }}>
+                    GMV: <strong>{formatVND(sd.gmv || 0)}</strong>
+                    {sd.spend ? ` • QC: ${formatVND(sd.spend)}` : ''}
+                    {sd.roi ? ` • ROI: ${sd.roi} lần` : ''}
+                    {sd.cpm ? ` • CPM: ${formatVND(sd.cpm)}` : ''}
+                  </div>
+                  {sd.strengths?.length > 0 && (
+                    <div style={{ marginBottom: '6px' }}>
+                      {sd.strengths.map((st, idx) => (
+                        <div key={idx} style={{ fontSize: '11px', color: '#15803d', lineHeight: '1.45' }}>✓ {st}</div>
+                      ))}
+                    </div>
+                  )}
+                  {sd.bottlenecks?.length > 0 && (
+                    <div>
+                      {sd.bottlenecks.map((bt, idx) => (
+                        <div key={idx} style={{ fontSize: '11px', color: '#b91c1c', lineHeight: '1.45' }}>⚠ {bt}</div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {Array.isArray(sopData.executive_report.action_plan) && sopData.executive_report.action_plan.length > 0 && (
+            <div style={{ background: '#ffffff', border: '1px solid #dbeafe', borderRadius: '10px', padding: '12px 14px' }}>
+              <div style={{ fontSize: '12px', fontWeight: '800', color: '#1d4ed8', marginBottom: '6px' }}>
+                Đề Xuất Hành Động Ngay Theo Bộ Phận:
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {sopData.executive_report.action_plan.map((act, idx) => (
+                  <div key={idx} style={{ fontSize: '12px', color: '#1e293b', lineHeight: '1.45' }}>
+                    <strong style={{ color: '#2563eb' }}>[{act.dept}] {act.title}:</strong> {act.detail}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Direct TikTok LIVE Sync Banner */}
       {syncStatus && (

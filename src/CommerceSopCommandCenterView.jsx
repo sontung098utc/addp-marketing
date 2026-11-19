@@ -1210,6 +1210,99 @@ export default function CommerceSopCommandCenterView({
         </div>
       </div>
 
+      {/* Executive Financial Health & Net ROI Diagnostic Card (100% Real Data) */}
+      {(() => {
+        const grossGmv = Number(shop.gross_gmv || shop.actual_gmv || 0);
+        const netGmv = Number(shop.actual_gmv || 0);
+        const lossAmt = Math.max(0, Number(shop.cancel_refund_loss || (grossGmv - netGmv) || 0));
+        const lossPct = grossGmv > 0 ? Number(((lossAmt / grossGmv) * 100).toFixed(2)) : 0;
+        const totalSpend = Number(shop.actual_spend || 0);
+        const grossRoi = totalSpend > 0 ? Number((grossGmv / totalSpend).toFixed(2)) : 0;
+        const netRoi = totalSpend > 0 ? Number((netGmv / totalSpend).toFixed(2)) : 0;
+        const grossCir = grossGmv > 0 ? Number(((totalSpend / grossGmv) * 100).toFixed(2)) : 0;
+        const netCir = netGmv > 0 ? Number(((totalSpend / netGmv) * 100).toFixed(2)) : 0;
+        const onePctSaving = Math.round(grossGmv * 0.01);
+        const targetLossDrop = Math.max(0, Number((lossPct - 10).toFixed(2)));
+        const estRecoverTo10 = Math.round(grossGmv * (targetLossDrop / 100));
+        const vidSpend = Number(video.actual_spend || 0);
+        const liveSpend = Number(live.actual_spend || 0);
+        const vidSpendShare = totalSpend > 0 ? Number(((vidSpend / totalSpend) * 100).toFixed(1)) : 0;
+        const liveSpendShare = totalSpend > 0 ? Number(((liveSpend / totalSpend) * 100).toFixed(1)) : 0;
+        const adsGrossTotal = Number(video.gross_gmv || video.actual_gmv || 0) + Number(live.gross_gmv || live.actual_gmv || 0);
+        const adsDepPct = grossGmv > 0 ? Math.min(100, Number(((adsGrossTotal / grossGmv) * 100).toFixed(1))) : 0;
+
+        if (grossGmv <= 0 && totalSpend <= 0) return null;
+
+        return (
+          <div style={{
+            background: 'linear-gradient(135deg, #f8fafc 0%, #eff6ff 100%)',
+            border: '1px solid #bfdbfe',
+            borderRadius: '14px',
+            padding: '18px 22px',
+            boxShadow: '0 2px 6px rgba(37,99,235,0.05)'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '12px' }}>
+              <div style={{ fontSize: '15px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <TrendingUp size={18} style={{ color: '#2563eb' }} />
+                Bóc Tách Sức Khỏe Tài Chính &amp; Hiệu Quả Thực Nhận (Đã Trừ Hủy/Hoàn)
+              </div>
+              <span style={{ fontSize: '11px', fontWeight: '700', background: lossPct > 10 ? '#fef2f2' : '#dcfce7', color: lossPct > 10 ? '#b91c1c' : '#15803d', padding: '3px 9px', borderRadius: '999px' }}>
+                Tỷ lệ hủy/hoàn: {lossPct}% {lossPct > 10 ? '(Cao hơn ngưỡng chuẩn < 10%)' : '(An toàn < 10%)'}
+              </span>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', marginBottom: '12px' }}>
+              <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '12px 14px' }}>
+                <div style={{ fontSize: '11px', color: '#64748b', fontWeight: '600' }}>ROI Gộp vs ROI THỰC (Toàn Shop)</div>
+                <div style={{ fontSize: '17px', fontWeight: '800', color: '#0f172a', marginTop: '4px' }}>
+                  {grossRoi}x <span style={{ color: '#94a3b8', fontWeight: '400' }}>→</span>{' '}
+                  <span style={{ color: netRoi >= Number(config.target_roi || 13) ? '#15803d' : '#dc2626' }}>{netRoi}x</span>
+                </div>
+                <div style={{ fontSize: '11px', color: '#475569', marginTop: '3px' }}>
+                  CIR gộp: <strong>{grossCir}%</strong> → CIR thực: <strong style={{ color: '#b91c1c' }}>{netCir}%</strong>
+                </div>
+              </div>
+
+              <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '12px 14px' }}>
+                <div style={{ fontSize: '11px', color: '#64748b', fontWeight: '600' }}>Thất Thoát Hủy / Hoàn Trong Kỳ</div>
+                <div style={{ fontSize: '17px', fontWeight: '800', color: '#dc2626', marginTop: '4px' }}>
+                  -{formatVND(lossAmt)} ({lossPct}%)
+                </div>
+                <div style={{ fontSize: '11px', color: '#475569', marginTop: '3px' }}>
+                  Cứ giảm 1% hủy hoàn = cứu thêm <strong style={{ color: '#059669' }}>{formatVND(onePctSaving)}</strong>
+                </div>
+              </div>
+
+              <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '12px 14px' }}>
+                <div style={{ fontSize: '11px', color: '#64748b', fontWeight: '600' }}>Cơ Cấu Chi Phí Ads (Video / Live)</div>
+                <div style={{ fontSize: '17px', fontWeight: '800', color: '#1d4ed8', marginTop: '4px' }}>
+                  {vidSpendShare}% / {liveSpendShare}%
+                </div>
+                <div style={{ fontSize: '11px', color: '#475569', marginTop: '3px' }}>
+                  Chuẩn SOP: 75% Video / 25% Livestream
+                </div>
+              </div>
+
+              <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '12px 14px' }}>
+                <div style={{ fontSize: '11px', color: '#64748b', fontWeight: '600' }}>Mức Độ Phụ Thuộc Quảng Cáo</div>
+                <div style={{ fontSize: '17px', fontWeight: '800', color: adsDepPct >= 75 ? '#d97706' : '#059669', marginTop: '4px' }}>
+                  {adsDepPct}% GMV từ Ads
+                </div>
+                <div style={{ fontSize: '11px', color: '#475569', marginTop: '3px' }}>
+                  {adsDepPct >= 75 ? 'Organic mỏng — cần thêm video mới & Follow' : 'Tỷ trọng đơn tự nhiên ổn định'}
+                </div>
+              </div>
+            </div>
+
+            {lossPct > 10 && estRecoverTo10 > 0 && (
+              <div style={{ background: '#ffffff', border: '1px solid #fecaca', borderRadius: '8px', padding: '9px 12px', fontSize: '12px', color: '#7f1d1d' }}>
+                <strong>Khuyến nghị tài chính tức thì:</strong> Kéo tỷ lệ hủy hoàn từ <strong>{lossPct}%</strong> về mốc chuẩn <strong>10%</strong> sẽ thu hồi trực tiếp khoảng <strong style={{ color: '#059669' }}>{formatVND(estRecoverTo10)}</strong> doanh số thực mà không cần tốn thêm 1 đồng ngân sách quảng cáo.
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
       {/* Campaign Breakdown Table */}
       <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '18px 22px', boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04)' }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>

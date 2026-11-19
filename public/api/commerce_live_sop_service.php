@@ -157,23 +157,26 @@ class CommerceLiveSopService {
     ): array {
         $config = $this->resolveConfig($shopId, $overrides);
 
-        // Ensure extended Live Workbench columns & verified real sessions exist
+        // Ensure extended Live Workbench columns & purge any old unverified seed estimates
+        $apiSyncDiagnostic = null;
         try {
             require_once __DIR__ . '/commerce_analytics_service.php';
             $analyticsSvc = new CommerceAnalyticsService($this->db);
             $analyticsSvc->ensureLiveSessionsColumns();
-            $analyticsSvc->seedVerifiedScreenshotLiveSessions($shopId);
+            $analyticsSvc->purgeEstimatedSeedSessions($shopId);
         } catch (\Throwable $t) {
             $analyticsSvc = null;
         }
 
-        // 1. Load LIVE sessions from commerce_live_sessions
+        // 1. Load LIVE sessions from commerce_live_sessions (100% real API or verified Workbench imports)
         $sessions = $this->fetchLiveSessions($shopId, $startDate, $endDate);
         if (empty($sessions) && $analyticsSvc !== null) {
             try {
-                $analyticsSvc->syncShopLivesAnalytics($shopId, $startDate, $endDate);
+                $apiSyncDiagnostic = $analyticsSvc->syncShopLivesAnalytics($shopId, $startDate, $endDate);
                 $sessions = $this->fetchLiveSessions($shopId, $startDate, $endDate);
-            } catch (\Throwable $t) {}
+            } catch (\Throwable $t) {
+                $apiSyncDiagnostic = ['status' => 'FAILED', 'message' => $t->getMessage()];
+            }
         }
 
         // 2. Load LIVE Ads spend & attributed revenue (room-level first, then daily campaign-level)
@@ -186,7 +189,7 @@ class CommerceLiveSopService {
         $shopCancelRate = $shopLossStats['cancel_rate'];
         $shopRefundRate = $shopLossStats['refund_rate'];
 
-        // 2c. If commerce_live_sessions is still empty in period, synthesize sessions from active LIVE Ads runs
+        // 2c. If commerce_live_sessions is still empty in period, synthesize daily campaign runs marked clearly as Gộp ngày
         if (empty($sessions)) {
             $sessions = $this->fetchSyntheticLiveSessionsFromAds($shopId, $startDate, $endDate);
         }
@@ -199,15 +202,6 @@ class CommerceLiveSopService {
             'session_2' => $this->initSlotBucket(2, 'Ca 2 — Chiều (14:00 – 18:59)'),
             'session_3' => $this->initSlotBucket(3, 'Ca 3 — Tối (≥ 19:00)'),
         ];
-
-        // Count sessions and sum GMV per date for proportional day-level spend allocation
-        $sessionsCountByDate = [];
-        $sessionsGmvByDate = [];
-        foreach ($sessions as $s) {
-            $d = substr((string)$s['start_time'], 0, 10);
-            $sessionsCountByDate[$d] = ($sessionsCountByDate[$d] ?? 0) + 1;
-            $sessionsGmvByDate[$d] = ($sessionsGmvByDate[$d] ?? 0.0) + (float)($s['gmv'] ?? 0.0);
-        }
 
         foreach ($sessions as $s) {
             $sid = (string)$s['session_id'];
@@ -226,7 +220,8 @@ class CommerceLiveSopService {
 
             $rawGmv = isset($s['gmv']) ? (float)$s['gmv'] : null;
 
-            // Determine Ads spend & attributed revenue for this session
+            // STRICT REAL DATA: Only attach Ads spend when it is EXACT for this session/room
+            // (NEVER fabricate per-session spend by guessing/splitting daily campaign totals)
             $spend = isset($s['direct_spend']) ? (float)$s['direct_spend'] : null;
             $attributedGmv = isset($s['direct_attributed_gmv']) ? (float)$s['direct_attributed_gmv'] : null;
             $attributedOrders = isset($s['direct_attributed_orders']) ? (int)$s['direct_attributed_orders'] : null;
@@ -237,41 +232,30 @@ class CommerceLiveSopService {
                 $attributedGmv = $rawGmv;
                 $attributedOrders = isset($s['orders_count']) ? (int)$s['orders_count'] : null;
                 $spendAttributionMode = 'EXACT_WORKBENCH_SPEND';
-            } elseif ($spend === null && isset($roomAdsMap[$sid])) {
+            } elseif ($spend === null && isset($roomAdsMap[$sid]) && (float)$roomAdsMap[$sid]['spend'] > 0) {
                 $spend = (float)$roomAdsMap[$sid]['spend'];
                 $attributedGmv = (float)$roomAdsMap[$sid]['ads_gross_revenue'];
                 $attributedOrders = (int)$roomAdsMap[$sid]['orders'];
                 $spendAttributionMode = 'EXACT_ROOM_ID';
-            } elseif ($spend === null && isset($dailyCampaignAds[$sDate]) && $dailyCampaignAds[$sDate]['spend'] > 0) {
-                $daySessCount = max(1, $sessionsCountByDate[$sDate] ?? 1);
-                $dayTotalGmv = (float)($sessionsGmvByDate[$sDate] ?? 0.0);
-                if ($dayTotalGmv > 0 && $rawGmv !== null && $rawGmv > 0) {
-                    $share = $rawGmv / $dayTotalGmv;
-                    $spend = round($dailyCampaignAds[$sDate]['spend'] * $share, 0);
-                    $attributedGmv = round($dailyCampaignAds[$sDate]['gross_revenue'] * $share, 0);
-                    $attributedOrders = (int)round($dailyCampaignAds[$sDate]['orders'] * $share);
-                    $spendAttributionMode = 'DAY_GMV_PROPORTIONAL';
-                } else {
-                    $spend = round($dailyCampaignAds[$sDate]['spend'] / $daySessCount, 0);
-                    $attributedGmv = round($dailyCampaignAds[$sDate]['gross_revenue'] / $daySessCount, 0);
-                    $attributedOrders = (int)round($dailyCampaignAds[$sDate]['orders'] / $daySessCount);
-                    $spendAttributionMode = 'DAY_EQUAL_SPLIT';
-                }
             }
 
             $CancelLoss = $rawGmv !== null ? round($rawGmv * $shopLossRate, 0) : null;
             $realizedGmv = $rawGmv !== null ? max(0.0, round($rawGmv - (float)$CancelLoss, 0)) : null;
             $realizedAttrGmv = $attributedGmv !== null ? max(0.0, round($attributedGmv * (1.0 - $shopLossRate), 0)) : null;
 
-            $durationSec = isset($s['duration_seconds']) && $s['duration_seconds'] !== null ? (int)$s['duration_seconds'] : null;
+            $durationSec = isset($s['duration_seconds']) && $s['duration_seconds'] !== null && (int)$s['duration_seconds'] > 0 ? (int)$s['duration_seconds'] : null;
             $durationHours = $durationSec !== null ? round($durationSec / 3600, 2) : null;
 
             $impressionsVal = isset($s['impressions']) && (int)$s['impressions'] > 0 ? (int)$s['impressions'] : null;
-            $viewsVal = isset($s['total_views']) && $s['total_views'] !== null ? (int)$s['total_views'] : null;
+            $viewsVal = isset($s['total_views']) && $s['total_views'] !== null && (int)$s['total_views'] > 0 ? (int)$s['total_views'] : null;
             $uniqueViewersVal = isset($s['unique_viewers']) && (int)$s['unique_viewers'] > 0 ? (int)$s['unique_viewers'] : null;
-            $clicksVal = isset($s['clicks']) && $s['clicks'] !== null ? (int)$s['clicks'] : null;
+            $clicksVal = isset($s['clicks']) && $s['clicks'] !== null && (int)$s['clicks'] > 0 ? (int)$s['clicks'] : null;
             $ordersVal = isset($s['orders_count']) ? (int)$s['orders_count'] : null;
             $unitsSoldVal = isset($s['units_sold']) ? (int)$s['units_sold'] : $ordersVal;
+
+            $previewCtrPct = isset($s['preview_ctr_pct']) && (float)$s['preview_ctr_pct'] > 0
+                ? round((float)$s['preview_ctr_pct'], 2)
+                : null;
 
             $enterRoomRatePct = isset($s['enter_room_rate_pct']) && (float)$s['enter_room_rate_pct'] > 0
                 ? round((float)$s['enter_room_rate_pct'], 2)
@@ -283,7 +267,7 @@ class CommerceLiveSopService {
 
             $skuOrderRatePct = isset($s['sku_order_rate_pct']) && (float)$s['sku_order_rate_pct'] > 0
                 ? round((float)$s['sku_order_rate_pct'], 2)
-                : (($unitsSoldVal !== null && $viewsVal !== null && $viewsVal > 0) ? round(($unitsSoldVal / $viewsVal) * 100, 2) : null);
+                : null;
 
             $gpmVal = isset($s['gpm']) && (float)$s['gpm'] > 0
                 ? round((float)$s['gpm'], 0)
@@ -320,6 +304,7 @@ class CommerceLiveSopService {
             $item = [
                 'session_id' => $sid,
                 'campaign_id' => $s['campaign_id'] ?? null,
+                'data_source' => (string)($s['data_source'] ?? (!empty($s['is_daily_aggregate']) ? 'ADS_CAMPAIGN_DAILY' : 'TIKTOK_SHOP_API')),
                 'title' => (string)($s['title'] && $s['title'] !== '--' ? $s['title'] : ('Phiên LIVE ' . date('d/m H:i', strtotime((string)$s['start_time'])))),
                 'raw_title' => (string)($s['title'] ?? ''),
                 'creator_username' => (string)($s['creator_username'] ?? 'duocphamaddp'),
@@ -327,7 +312,7 @@ class CommerceLiveSopService {
                 'end_time' => $s['end_time'],
                 'stat_date' => $sDate,
                 'slot_key' => $slotKey,
-                'slot_label' => !empty($s['is_daily_aggregate']) ? 'Gộp ngày' : $slotLabel,
+                'slot_label' => !empty($s['is_daily_aggregate']) ? 'Gộp ngày (QC)' : $slotLabel,
                 'is_daily_aggregate' => !empty($s['is_daily_aggregate']),
                 'is_active' => $isActiveSession,
                 'duration_seconds' => $durationSec,
@@ -341,12 +326,13 @@ class CommerceLiveSopService {
                 'clicks' => $clicksVal,
                 'orders_count' => $ordersVal,
                 'units_sold' => $unitsSoldVal,
+                'preview_ctr_pct' => $previewCtrPct,
                 'enter_room_rate_pct' => $enterRoomRatePct,
                 'ctr_live_pct' => $ctrLivePct,
                 'sku_order_rate_pct' => $skuOrderRatePct,
                 'comment_rate_pct' => isset($s['comment_rate_pct']) && (float)$s['comment_rate_pct'] > 0 ? round((float)$s['comment_rate_pct'], 2) : null,
                 'follow_rate_pct' => isset($s['follow_rate_pct']) && (float)$s['follow_rate_pct'] > 0 ? round((float)$s['follow_rate_pct'], 2) : null,
-                'share_rate_pct' => isset($s['share_rate_pct']) ? round((float)$s['share_rate_pct'], 2) : null,
+                'share_rate_pct' => isset($s['share_rate_pct']) && $s['share_rate_pct'] !== null ? round((float)$s['share_rate_pct'], 2) : null,
                 'like_rate_pct' => isset($s['like_rate_pct']) && (float)$s['like_rate_pct'] > 0 ? round((float)$s['like_rate_pct'], 2) : null,
                 'gpm' => $gpmVal,
                 'gmv_per_hour' => $gmvPerHour,
@@ -354,6 +340,7 @@ class CommerceLiveSopService {
                 'cancel_refund_loss' => $CancelLoss,
                 'realized_gmv' => $realizedGmv,
                 'spend' => $spend,
+                'cpm' => ($spend !== null && $impressionsVal !== null && $impressionsVal > 0) ? round(($spend / $impressionsVal) * 1000, 0) : null,
                 'attributed_gmv' => $attributedGmv,
                 'realized_attributed_gmv' => $realizedAttrGmv,
                 'attributed_orders' => $attributedOrders,
@@ -468,8 +455,12 @@ class CommerceLiveSopService {
         $liveCampaigns = $this->fetchDetailedLiveCampaigns($shopId, $startDate, $endDate, $config, $shopLossStats);
         $liveProducts = $this->fetchDetailedLiveProducts($shopId, $startDate, $endDate);
 
+        // 6. Executive Live Comparison & Diagnosis Report (auto-generated from real sessions)
+        $executiveReport = $this->buildExecutiveLiveComparisonReport($activeSessions, $config, $hasPeriodSpend ? $periodTotalSpend : null);
+
         return [
             'status' => $totalSessions > 0 || $hasPeriodSpend ? 'OK' : 'NO_DATA',
+            'api_sync_diagnostic' => $apiSyncDiagnostic,
             'period' => [
                 'start_date' => $startDate,
                 'end_date' => $endDate,
@@ -489,9 +480,197 @@ class CommerceLiveSopService {
             ],
             'slots' => $sessionSlotBuckets,
             'overall_funnel' => $overallFunnel,
+            'executive_report' => $executiveReport,
             'sessions' => $enrichedSessions,
             'live_campaigns' => $liveCampaigns,
             'live_products' => $liveProducts,
+        ];
+    }
+
+    /**
+     * Builds an Executive Director-level Comparison & Root-Cause Diagnosis Report
+     * across the real LIVE sessions in the selected period (ZERO mock data).
+     */
+    private function buildExecutiveLiveComparisonReport(array $activeSessions, array $config, ?float $periodSpend): array {
+        $realSessions = array_values(array_filter($activeSessions, fn($s) => empty($s['is_daily_aggregate'])));
+        if (empty($realSessions)) {
+            return [
+                'has_real_sessions' => false,
+                'headline' => 'Chưa có phiên LIVE tách lẻ theo Room ID trong kỳ đang chọn',
+                'summary_points' => [
+                    'Bấm "Đồng bộ Ca LIVE thực tế từ TikTok" hoặc dùng nút "Nhập / Đối soát Live Workbench" để nạp chính xác từng phiên Live và kích hoạt báo cáo so sánh 8 chỉ số.'
+                ],
+                'session_diagnoses' => [],
+                'action_plan' => [],
+            ];
+        }
+
+        $totalGmv = 0.0;
+        $totalUnits = 0;
+        $totalImps = 0;
+        $totalSpend = 0.0;
+        $hasExactSpendCount = 0;
+        foreach ($realSessions as $s) {
+            $totalGmv += (float)($s['gmv'] ?? 0);
+            $totalUnits += (int)($s['units_sold'] ?? $s['orders_count'] ?? 0);
+            $totalImps += (int)($s['impressions'] ?? 0);
+            if ($s['spend'] !== null && $s['spend'] > 0) {
+                $totalSpend += (float)$s['spend'];
+                $hasExactSpendCount++;
+            }
+        }
+        $effectiveSpend = $hasExactSpendCount === count($realSessions) ? $totalSpend : ($periodSpend ?? $totalSpend);
+        $blendedRoi = ($effectiveSpend > 0 && $totalGmv > 0) ? round($totalGmv / $effectiveSpend, 2) : null;
+
+        $sessionDiagnoses = [];
+        $actionPlan = [];
+        $hasLowPreviewCtr = false;
+        $hasShortDuration = false;
+        $hasShortWatchTime = false;
+        $hasLowFollowRate = false;
+        $bestWatchSession = null;
+        $worstWatchSession = null;
+
+        foreach ($realSessions as $s) {
+            $strengths = [];
+            $bottlenecks = [];
+
+            $durH = $s['duration_hours'];
+            $minH = (float)($config['min_duration_hours'] ?? 3.0);
+            $watchSec = $s['avg_watch_time_sec'];
+            $cpm = $s['cpm'];
+            $enterRate = $s['enter_room_rate_pct'];
+            $previewCtr = $s['preview_ctr_pct'];
+            $ctrLive = $s['ctr_live_pct'];
+            $cvr = $s['sku_order_rate_pct'];
+            $commentRate = $s['comment_rate_pct'];
+            $followRate = $s['follow_rate_pct'];
+            $gpm = $s['gpm'];
+            $roi = $s['roi'];
+
+            if ($watchSec !== null) {
+                if ($bestWatchSession === null || $watchSec > $bestWatchSession['avg_watch_time_sec']) {
+                    $bestWatchSession = $s;
+                }
+                if ($worstWatchSession === null || $watchSec < $worstWatchSession['avg_watch_time_sec']) {
+                    $worstWatchSession = $s;
+                }
+            }
+
+            if ($gpm !== null && $gpm >= 70000) {
+                $strengths[] = 'GPM hiển thị đạt chuẩn cao (' . number_format($gpm, 0, ',', '.') . ' đ / 1.000 hiển thị).';
+            }
+            if ($watchSec !== null && $watchSec >= 45) {
+                $strengths[] = 'Giữ chân người xem rất tốt (TB ' . $watchSec . ' giây' . ($s['views_over_1min'] ? ', ' . $s['views_over_1min'] . ' lượt > 1 phút' : '') . ').';
+            }
+            if ($commentRate !== null && $commentRate >= 15.0) {
+                $strengths[] = 'Tương tác bình luận bùng nổ (' . $commentRate . '%), tạo tín hiệu tích cực giúp hạ giá CPM.';
+            }
+            if ($cvr !== null && $cvr >= (float)($config['cvr_target'] ?? 5.0)) {
+                $strengths[] = 'Tỷ lệ đặt hàng đạt chuẩn SOP (' . $cvr . '% ≥ ' . ($config['cvr_target'] ?? 5) . '%).';
+            }
+            if ($enterRate !== null && $enterRate >= (float)($config['ctr_live_target'] ?? 5.0)) {
+                $strengths[] = 'Tỷ lệ nhấn vào phòng đạt chuẩn (' . $enterRate . '% ≥ 5%).';
+            }
+
+            if ($cpm !== null && $cpm > (float)($config['cpm_target'] ?? 5000)) {
+                $mult = round($cpm / max(1, (float)($config['cpm_target'] ?? 5000)), 1);
+                $bottlenecks[] = 'CPM quá đắt (' . number_format($cpm, 0, ',', '.') . ' đ — gấp ' . $mult . ' lần chuẩn ≤ 5.000 đ)' . ($watchSec !== null && $watchSec < 45 ? ' do thời lượng xem TB ngắn (' . $watchSec . 's).' : '.');
+            }
+            if ($watchSec !== null && $watchSec < 45) {
+                $hasShortWatchTime = true;
+                $bottlenecks[] = 'Khách thoát nhanh (xem TB chỉ ' . $watchSec . ' giây < 45s' . ($s['views_over_1min'] !== null ? ', chỉ ' . $s['views_over_1min'] . ' lượt > 1 phút' : '') . ') khiến sàn hạn chế phân phối tự nhiên.';
+            }
+            if ($enterRate !== null && $enterRate < (float)($config['ctr_live_target'] ?? 5.0)) {
+                $hasLowPreviewCtr = true;
+                $bottlenecks[] = 'Tỷ lệ vào phòng thấp (' . $enterRate . '% < 5%' . ($previewCtr !== null ? '; riêng Bản xem trước chỉ ' . $previewCtr . '%' : '') . ') — khung hình/hook 3 giây đầu chưa đủ hút click.';
+            }
+            if ($ctrLive !== null && $ctrLive < (float)($config['ctor_target_min'] ?? 30.0)) {
+                $bottlenecks[] = 'CTR của LIVE / bấm giỏ hàng chưa đạt (' . $ctrLive . '% < ' . ($config['ctor_target_min'] ?? 30) . '%).';
+            }
+            if ($durH !== null && $durH < $minH) {
+                $hasShortDuration = true;
+                $missingH = round($minH - $durH, 2);
+                $estLostGmv = ($s['gmv_per_hour'] !== null && $s['gmv_per_hour'] > 0) ? round($s['gmv_per_hour'] * $missingH, 0) : null;
+                $bottlenecks[] = 'Tắt Live sớm ở mốc ' . $durH . 'h (thiếu ' . round($missingH * 60) . ' phút so với chuẩn ' . $minH . 'h)' . ($estLostGmv ? ' — ước tính hụt ~' . number_format($estLostGmv, 0, ',', '.') . ' đ GMV.' : '.');
+            }
+            if ($followRate !== null && $followRate < 1.0) {
+                $hasLowFollowRate = true;
+            }
+
+            $sessionDiagnoses[] = [
+                'session_id' => $s['session_id'],
+                'slot_label' => $s['slot_label'],
+                'title' => $s['title'],
+                'start_time' => $s['start_time'],
+                'data_source' => $s['data_source'],
+                'gmv' => $s['gmv'],
+                'spend' => $s['spend'],
+                'roi' => $roi,
+                'cpm' => $cpm,
+                'duration_hours' => $durH,
+                'avg_watch_time_sec' => $watchSec,
+                'enter_room_rate_pct' => $enterRate,
+                'preview_ctr_pct' => $previewCtr,
+                'ctr_live_pct' => $ctrLive,
+                'sku_order_rate_pct' => $cvr,
+                'comment_rate_pct' => $commentRate,
+                'follow_rate_pct' => $followRate,
+                'weakest_link_label' => $s['weakest_link']['label'] ?? null,
+                'strengths' => $strengths,
+                'bottlenecks' => $bottlenecks,
+            ];
+        }
+
+        // Cross-session comparison insight (e.g. Watch time vs CPM)
+        $summaryPoints = [];
+        $summaryPoints[] = 'Tổng ' . count($realSessions) . ' phiên LIVE thực tế: Doanh số ' . number_format($totalGmv, 0, ',', '.') . ' đ (' . $totalUnits . ' món bán ra)' . ($effectiveSpend > 0 ? ' • Chi phí QC: ' . number_format($effectiveSpend, 0, ',', '.') . ' đ • ROI trung bình: ' . ($blendedRoi ?? '—') . ' lần.' : '.');
+        if ($bestWatchSession && $worstWatchSession && $bestWatchSession['session_id'] !== $worstWatchSession['session_id']) {
+            if ($bestWatchSession['cpm'] && $worstWatchSession['cpm'] && $worstWatchSession['cpm'] > $bestWatchSession['cpm']) {
+                $cpmDropPct = round((($worstWatchSession['cpm'] - $bestWatchSession['cpm']) / $worstWatchSession['cpm']) * 100, 0);
+                $summaryPoints[] = 'Đối chiếu giữ chân & giá thầu: Phiên "' . $bestWatchSession['title'] . '" giữ chân TB ' . $bestWatchSession['avg_watch_time_sec'] . 's giúp CPM giảm ' . $cpmDropPct . '% (' . number_format($bestWatchSession['cpm'], 0, ',', '.') . ' đ so với ' . number_format($worstWatchSession['cpm'], 0, ',', '.') . ' đ của phiên "' . $worstWatchSession['title'] . '").';
+            }
+        }
+
+        if ($hasShortWatchTime) {
+            $actionPlan[] = [
+                'dept' => 'Livestream',
+                'title' => 'Nhân bản kịch bản giữ chân > 45 giây & kéo bình luận',
+                'detail' => 'Áp dụng tương tác hỏi đáp liên tục, mini-game kéo bình luận > 30% và pha viên sủi trực tiếp mỗi 5 phút để giảm CPM từ ~20K xuống dưới 10K.'
+            ];
+        }
+        if ($hasLowPreviewCtr) {
+            $actionPlan[] = [
+                'dept' => 'Livestream + Nội dung',
+                'title' => 'Sửa gấp "mặt tiền" Bản xem trước LIVE (Preview CTR < 3%)',
+                'detail' => 'Tạo chuyển động liên tục giữa khung hình (ly nước sủi bọt, cầm cận cảnh Combo 5 tuýp), treo bảng Deal chữ to tương phản mạnh và đặt tiêu đề Live có ưu đãi cụ thể.'
+            ];
+        }
+        if ($hasShortDuration) {
+            $actionPlan[] = [
+                'dept' => 'Livestream + Ads',
+                'title' => 'Chạy đủ thời lượng tối thiểu ≥ ' . ($config['min_duration_hours'] ?? 3) . ' giờ/ca',
+                'detail' => 'Không tắt Live sớm ở mốc 2h–2h20p khi máy học vừa ổn định phân phối; chủ động châm ngân sách tại mốc 60% nếu CVR & ROI đang tốt.'
+            ];
+        }
+        if ($hasLowFollowRate) {
+            $actionPlan[] = [
+                'dept' => 'Sản phẩm + Livestream',
+                'title' => 'Kéo Tỷ lệ theo dõi lên ≥ 1% bằng Voucher Follow Shop',
+                'detail' => 'Gắn Voucher Follow 10K–15K riêng cho phòng Live và nhắc khách bấm Theo dõi trước khi chốt đơn Combo 3–5 tuýp để tích lũy tệp khách quay lại miễn phí.'
+            ];
+        }
+
+        return [
+            'has_real_sessions' => true,
+            'headline' => 'Phân Tích & Đối Chiếu ' . count($realSessions) . ' Phiên LIVE Thực Tế Theo 8 Chỉ Số SOP',
+            'total_gmv' => round($totalGmv, 0),
+            'total_units' => $totalUnits,
+            'total_spend' => $effectiveSpend > 0 ? round($effectiveSpend, 0) : null,
+            'blended_roi' => $blendedRoi,
+            'summary_points' => $summaryPoints,
+            'session_diagnoses' => $sessionDiagnoses,
+            'action_plan' => $actionPlan,
         ];
     }
 
@@ -907,9 +1086,9 @@ class CommerceLiveSopService {
                 session_id, title, creator_username, start_time, end_time, duration_seconds,
                 gmv, orders_count, units_sold, customer_count, total_views, unique_viewers,
                 impressions, clicks, avg_watch_time_sec, views_over_1min,
-                enter_room_rate_pct, ctr_live_pct, sku_order_rate_pct,
+                preview_ctr_pct, enter_room_rate_pct, ctr_live_pct, sku_order_rate_pct,
                 comment_rate_pct, follow_rate_pct, share_rate_pct, like_rate_pct,
-                gpm, ad_spend,
+                gpm, ad_spend, data_source,
                 comments_count, shares_count, follows_count, peak_concurrent_users
                 FROM `commerce_live_sessions`
                 WHERE shop_id = ? AND start_time >= ? AND start_time <= ?

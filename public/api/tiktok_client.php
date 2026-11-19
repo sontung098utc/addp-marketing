@@ -851,6 +851,7 @@ class TikTokShopClient {
 
         $configuredEndpoint = defined('TIKTOK_API_ANALYTICS_LIVES_ENDPOINT') ? TIKTOK_API_ANALYTICS_LIVES_ENDPOINT : null;
         $candidates = array_unique(array_filter([
+            "/analytics/202609/shop_lives/performance",
             "/analytics/202605/shop_lives/performance",
             "/analytics/202509/shop_lives/performance",
             "/analytics/202409/shop_lives/performance",
@@ -931,6 +932,7 @@ class TikTokShopClient {
         $configuredEndpoint = defined('TIKTOK_API_ANALYTICS_VIDEOS_ENDPOINT') ? TIKTOK_API_ANALYTICS_VIDEOS_ENDPOINT : null;
         $candidates = array_unique(array_filter([
             $configuredEndpoint,
+            "/analytics/202609/shop_videos/performance",
             "/analytics/202605/shop_videos/performance",
             "/analytics/202509/shop_videos/performance",
             "/analytics/202409/shop_videos/performance",
